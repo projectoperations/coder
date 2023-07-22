@@ -10,7 +10,7 @@
     "copy-images": "sh ./scripts/copyImages.sh"
   },
   "dependencies": {
-    "@chakra-ui/react": "2.7.1",
+    "@chakra-ui/react": "2.8.0",
     "@emotion/react": "11",
     "@emotion/styled": "11",
     "archiver": "5.3.1",
@@ -30,8 +30,8 @@
     "@types/node": "18.0.0",
     "@types/react": "18.0.14",
     "@types/react-dom": "18.0.5",
-    "eslint": "8.17.0",
-    "eslint-config-next": "12.1.6",
+    "eslint": "8.45.0",
+    "eslint-config-next": "13.4.10",
     "typescript": "4.7.3"
   }
 }
