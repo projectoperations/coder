@@ -161,6 +161,7 @@
 
 ```json
 {
+  "agent_id": "string",
   "apps": [
     {
       "command": "string",
@@ -232,6 +233,7 @@
     }
   },
   "directory": "string",
+  "disable_direct_connections": true,
   "environment_variables": {
     "property1": "string",
     "property2": "string"
@@ -257,21 +259,23 @@
 
 ### Properties
 
-| Name                      | Type                                                                                              | Required | Restrictions | Description                                                                                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps`                    | array of [codersdk.WorkspaceApp](#codersdkworkspaceapp)                                           | false    |              |                                                                                                                                                            |
-| `derpmap`                 | [tailcfg.DERPMap](#tailcfgderpmap)                                                                | false    |              |                                                                                                                                                            |
-| `directory`               | string                                                                                            | false    |              |                                                                                                                                                            |
-| `environment_variables`   | object                                                                                            | false    |              |                                                                                                                                                            |
-| » `[any property]`        | string                                                                                            | false    |              |                                                                                                                                                            |
-| `git_auth_configs`        | integer                                                                                           | false    |              | Git auth configs stores the number of Git configurations the Coder deployment has. If this number is >0, we set up special configuration in the workspace. |
-| `metadata`                | array of [codersdk.WorkspaceAgentMetadataDescription](#codersdkworkspaceagentmetadatadescription) | false    |              |                                                                                                                                                            |
-| `motd_file`               | string                                                                                            | false    |              |                                                                                                                                                            |
-| `shutdown_script`         | string                                                                                            | false    |              |                                                                                                                                                            |
-| `shutdown_script_timeout` | integer                                                                                           | false    |              |                                                                                                                                                            |
-| `startup_script`          | string                                                                                            | false    |              |                                                                                                                                                            |
-| `startup_script_timeout`  | integer                                                                                           | false    |              |                                                                                                                                                            |
-| `vscode_port_proxy_uri`   | string                                                                                            | false    |              |                                                                                                                                                            |
+| Name                         | Type                                                                                              | Required | Restrictions | Description                                                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_id`                   | string                                                                                            | false    |              |                                                                                                                                                            |
+| `apps`                       | array of [codersdk.WorkspaceApp](#codersdkworkspaceapp)                                           | false    |              |                                                                                                                                                            |
+| `derpmap`                    | [tailcfg.DERPMap](#tailcfgderpmap)                                                                | false    |              |                                                                                                                                                            |
+| `directory`                  | string                                                                                            | false    |              |                                                                                                                                                            |
+| `disable_direct_connections` | boolean                                                                                           | false    |              |                                                                                                                                                            |
+| `environment_variables`      | object                                                                                            | false    |              |                                                                                                                                                            |
+| » `[any property]`           | string                                                                                            | false    |              |                                                                                                                                                            |
+| `git_auth_configs`           | integer                                                                                           | false    |              | Git auth configs stores the number of Git configurations the Coder deployment has. If this number is >0, we set up special configuration in the workspace. |
+| `metadata`                   | array of [codersdk.WorkspaceAgentMetadataDescription](#codersdkworkspaceagentmetadatadescription) | false    |              |                                                                                                                                                            |
+| `motd_file`                  | string                                                                                            | false    |              |                                                                                                                                                            |
+| `shutdown_script`            | string                                                                                            | false    |              |                                                                                                                                                            |
+| `shutdown_script_timeout`    | integer                                                                                           | false    |              |                                                                                                                                                            |
+| `startup_script`             | string                                                                                            | false    |              |                                                                                                                                                            |
+| `startup_script_timeout`     | integer                                                                                           | false    |              |                                                                                                                                                            |
+| `vscode_port_proxy_uri`      | string                                                                                            | false    |              |                                                                                                                                                            |
 
 ## agentsdk.PatchStartupLogs
 
@@ -315,15 +319,17 @@
 
 ```json
 {
+  "changed_at": "string",
   "state": "created"
 }
 ```
 
 ### Properties
 
-| Name    | Type                                                                 | Required | Restrictions | Description |
-| ------- | -------------------------------------------------------------------- | -------- | ------------ | ----------- |
-| `state` | [codersdk.WorkspaceAgentLifecycle](#codersdkworkspaceagentlifecycle) | false    |              |             |
+| Name         | Type                                                                 | Required | Restrictions | Description |
+| ------------ | -------------------------------------------------------------------- | -------- | ------------ | ----------- |
+| `changed_at` | string                                                               | false    |              |             |
+| `state`      | [codersdk.WorkspaceAgentLifecycle](#codersdkworkspaceagentlifecycle) | false    |              |             |
 
 ## agentsdk.PostMetadataRequest
 
@@ -529,6 +535,7 @@
   },
   "hidden": true,
   "name": "string",
+  "required": true,
   "use_instead": [
     {
       "annotations": {
@@ -553,6 +560,7 @@
       },
       "hidden": true,
       "name": "string",
+      "required": true,
       "use_instead": [],
       "value": null,
       "value_source": "",
@@ -567,21 +575,22 @@
 
 ### Properties
 
-| Name             | Type                                       | Required | Restrictions | Description                                                                                                                    |
-| ---------------- | ------------------------------------------ | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `annotations`    | [clibase.Annotations](#clibaseannotations) | false    |              | Annotations enable extensions to clibase higher up in the stack. It's useful for help formatting and documentation generation. |
-| `default`        | string                                     | false    |              | Default is parsed into Value if set.                                                                                           |
-| `description`    | string                                     | false    |              |                                                                                                                                |
-| `env`            | string                                     | false    |              | Env is the environment variable used to configure this option. If unset, environment configuring is disabled.                  |
-| `flag`           | string                                     | false    |              | Flag is the long name of the flag used to configure this option. If unset, flag configuring is disabled.                       |
-| `flag_shorthand` | string                                     | false    |              | Flag shorthand is the one-character shorthand for the flag. If unset, no shorthand is used.                                    |
-| `group`          | [clibase.Group](#clibasegroup)             | false    |              | Group is a group hierarchy that helps organize this option in help, configs and other documentation.                           |
-| `hidden`         | boolean                                    | false    |              |                                                                                                                                |
-| `name`           | string                                     | false    |              |                                                                                                                                |
-| `use_instead`    | array of [clibase.Option](#clibaseoption)  | false    |              | Use instead is a list of options that should be used instead of this one. The field is used to generate a deprecation warning. |
-| `value`          | any                                        | false    |              | Value includes the types listed in values.go.                                                                                  |
-| `value_source`   | [clibase.ValueSource](#clibasevaluesource) | false    |              |                                                                                                                                |
-| `yaml`           | string                                     | false    |              | Yaml is the YAML key used to configure this option. If unset, YAML configuring is disabled.                                    |
+| Name             | Type                                       | Required | Restrictions | Description                                                                                                                                        |
+| ---------------- | ------------------------------------------ | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `annotations`    | [clibase.Annotations](#clibaseannotations) | false    |              | Annotations enable extensions to clibase higher up in the stack. It's useful for help formatting and documentation generation.                     |
+| `default`        | string                                     | false    |              | Default is parsed into Value if set.                                                                                                               |
+| `description`    | string                                     | false    |              |                                                                                                                                                    |
+| `env`            | string                                     | false    |              | Env is the environment variable used to configure this option. If unset, environment configuring is disabled.                                      |
+| `flag`           | string                                     | false    |              | Flag is the long name of the flag used to configure this option. If unset, flag configuring is disabled.                                           |
+| `flag_shorthand` | string                                     | false    |              | Flag shorthand is the one-character shorthand for the flag. If unset, no shorthand is used.                                                        |
+| `group`          | [clibase.Group](#clibasegroup)             | false    |              | Group is a group hierarchy that helps organize this option in help, configs and other documentation.                                               |
+| `hidden`         | boolean                                    | false    |              |                                                                                                                                                    |
+| `name`           | string                                     | false    |              |                                                                                                                                                    |
+| `required`       | boolean                                    | false    |              | Required means this value must be set by some means. It requires `ValueSource != ValueSourceNone` If `Default` is set, then `Required` is ignored. |
+| `use_instead`    | array of [clibase.Option](#clibaseoption)  | false    |              | Use instead is a list of options that should be used instead of this one. The field is used to generate a deprecation warning.                     |
+| `value`          | any                                        | false    |              | Value includes the types listed in values.go.                                                                                                      |
+| `value_source`   | [clibase.ValueSource](#clibasevaluesource) | false    |              |                                                                                                                                                    |
+| `yaml`           | string                                     | false    |              | Yaml is the YAML key used to configure this option. If unset, YAML configuring is disabled.                                                        |
 
 ## clibase.Struct-array_codersdk_GitAuthConfig
 
@@ -589,8 +598,12 @@
 {
   "value": [
     {
+      "app_install_url": "string",
+      "app_installations_url": "string",
       "auth_url": "string",
       "client_id": "string",
+      "device_code_url": "string",
+      "device_flow": true,
       "id": "string",
       "no_refresh": true,
       "regex": "string",
@@ -1105,6 +1118,7 @@
 
 ```json
 {
+  "convert_to_oidc_enabled": true,
   "github": {
     "enabled": true
   },
@@ -1121,11 +1135,12 @@
 
 ### Properties
 
-| Name       | Type                                               | Required | Restrictions | Description |
-| ---------- | -------------------------------------------------- | -------- | ------------ | ----------- |
-| `github`   | [codersdk.AuthMethod](#codersdkauthmethod)         | false    |              |             |
-| `oidc`     | [codersdk.OIDCAuthMethod](#codersdkoidcauthmethod) | false    |              |             |
-| `password` | [codersdk.AuthMethod](#codersdkauthmethod)         | false    |              |             |
+| Name                      | Type                                               | Required | Restrictions | Description |
+| ------------------------- | -------------------------------------------------- | -------- | ------------ | ----------- |
+| `convert_to_oidc_enabled` | boolean                                            | false    |              |             |
+| `github`                  | [codersdk.AuthMethod](#codersdkauthmethod)         | false    |              |             |
+| `oidc`                    | [codersdk.OIDCAuthMethod](#codersdkoidcauthmethod) | false    |              |             |
+| `password`                | [codersdk.AuthMethod](#codersdkauthmethod)         | false    |              |             |
 
 ## codersdk.AuthorizationCheck
 
@@ -1266,6 +1281,38 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `autostart` |
 | `autostop`  |
 
+## codersdk.ConnectionLatency
+
+```json
+{
+  "p50": 31.312,
+  "p95": 119.832
+}
+```
+
+### Properties
+
+| Name  | Type   | Required | Restrictions | Description |
+| ----- | ------ | -------- | ------------ | ----------- |
+| `p50` | number | false    |              |             |
+| `p95` | number | false    |              |             |
+
+## codersdk.ConvertLoginRequest
+
+```json
+{
+  "password": "string",
+  "to_type": "password"
+}
+```
+
+### Properties
+
+| Name       | Type                                     | Required | Restrictions | Description                              |
+| ---------- | ---------------------------------------- | -------- | ------------ | ---------------------------------------- |
+| `password` | string                                   | true     |              |                                          |
+| `to_type`  | [codersdk.LoginType](#codersdklogintype) | true     |              | To type is the login type to convert to. |
+
 ## codersdk.CreateFirstUserRequest
 
 ```json
@@ -1343,32 +1390,41 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "allow_user_cancel_workspace_jobs": true,
   "default_ttl_ms": 0,
   "description": "string",
+  "disable_everyone_group_access": true,
   "display_name": "string",
   "failure_ttl_ms": 0,
   "icon": "string",
   "inactivity_ttl_ms": 0,
+  "locked_ttl_ms": 0,
   "max_ttl_ms": 0,
   "name": "string",
+  "restart_requirement": {
+    "days_of_week": ["monday"],
+    "weeks": 0
+  },
   "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1"
 }
 ```
 
 ### Properties
 
-| Name                                                                                                                                                                                      | Type    | Required | Restrictions | Description                                                                                                                                                                                                                                           |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `allow_user_autostart`                                                                                                                                                                    | boolean | false    |              | Allow user autostart allows users to set a schedule for autostarting their workspace. By default this is true. This can only be disabled when using an enterprise license.                                                                            |
-| `allow_user_autostop`                                                                                                                                                                     | boolean | false    |              | Allow user autostop allows users to set a custom workspace TTL to use in place of the template's DefaultTTL field. By default this is true. If false, the DefaultTTL will always be used. This can only be disabled when using an enterprise license. |
-| `allow_user_cancel_workspace_jobs`                                                                                                                                                        | boolean | false    |              | Allow users to cancel in-progress workspace jobs. \*bool as the default value is "true".                                                                                                                                                              |
-| `default_ttl_ms`                                                                                                                                                                          | integer | false    |              | Default ttl ms allows optionally specifying the default TTL for all workspaces created from this template.                                                                                                                                            |
-| `description`                                                                                                                                                                             | string  | false    |              | Description is a description of what the template contains. It must be less than 128 bytes.                                                                                                                                                           |
-| `display_name`                                                                                                                                                                            | string  | false    |              | Display name is the displayed name of the template.                                                                                                                                                                                                   |
-| `failure_ttl_ms`                                                                                                                                                                          | integer | false    |              | Failure ttl ms allows optionally specifying the max lifetime before Coder stops all resources for failed workspaces created from this template.                                                                                                       |
-| `icon`                                                                                                                                                                                    | string  | false    |              | Icon is a relative path or external URL that specifies an icon to be displayed in the dashboard.                                                                                                                                                      |
-| `inactivity_ttl_ms`                                                                                                                                                                       | integer | false    |              | Inactivity ttl ms allows optionally specifying the max lifetime before Coder deletes inactive workspaces created from this template.                                                                                                                  |
-| `max_ttl_ms`                                                                                                                                                                              | integer | false    |              | Max ttl ms allows optionally specifying the max lifetime for workspaces created from this template.                                                                                                                                                   |
-| `name`                                                                                                                                                                                    | string  | true     |              | Name is the name of the template.                                                                                                                                                                                                                     |
-| `template_version_id`                                                                                                                                                                     | string  | true     |              | Template version ID is an in-progress or completed job to use as an initial version of the template.                                                                                                                                                  |
+| Name                                                                                                                                                                                      | Type                                                                       | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allow_user_autostart`                                                                                                                                                                    | boolean                                                                    | false    |              | Allow user autostart allows users to set a schedule for autostarting their workspace. By default this is true. This can only be disabled when using an enterprise license.                                                                                                                                          |
+| `allow_user_autostop`                                                                                                                                                                     | boolean                                                                    | false    |              | Allow user autostop allows users to set a custom workspace TTL to use in place of the template's DefaultTTL field. By default this is true. If false, the DefaultTTL will always be used. This can only be disabled when using an enterprise license.                                                               |
+| `allow_user_cancel_workspace_jobs`                                                                                                                                                        | boolean                                                                    | false    |              | Allow users to cancel in-progress workspace jobs. \*bool as the default value is "true".                                                                                                                                                                                                                            |
+| `default_ttl_ms`                                                                                                                                                                          | integer                                                                    | false    |              | Default ttl ms allows optionally specifying the default TTL for all workspaces created from this template.                                                                                                                                                                                                          |
+| `description`                                                                                                                                                                             | string                                                                     | false    |              | Description is a description of what the template contains. It must be less than 128 bytes.                                                                                                                                                                                                                         |
+| `disable_everyone_group_access`                                                                                                                                                           | boolean                                                                    | false    |              | Disable everyone group access allows optionally disabling the default behavior of granting the 'everyone' group access to use the template. If this is set to true, the template will not be available to all users, and must be explicitly granted to users or groups in the permissions settings of the template. |
+| `display_name`                                                                                                                                                                            | string                                                                     | false    |              | Display name is the displayed name of the template.                                                                                                                                                                                                                                                                 |
+| `failure_ttl_ms`                                                                                                                                                                          | integer                                                                    | false    |              | Failure ttl ms allows optionally specifying the max lifetime before Coder stops all resources for failed workspaces created from this template.                                                                                                                                                                     |
+| `icon`                                                                                                                                                                                    | string                                                                     | false    |              | Icon is a relative path or external URL that specifies an icon to be displayed in the dashboard.                                                                                                                                                                                                                    |
+| `inactivity_ttl_ms`                                                                                                                                                                       | integer                                                                    | false    |              | Inactivity ttl ms allows optionally specifying the max lifetime before Coder locks inactive workspaces created from this template.                                                                                                                                                                                  |
+| `locked_ttl_ms`                                                                                                                                                                           | integer                                                                    | false    |              | Locked ttl ms allows optionally specifying the max lifetime before Coder permanently deletes locked workspaces created from this template.                                                                                                                                                                          |
+| `max_ttl_ms`                                                                                                                                                                              | integer                                                                    | false    |              | Max ttl ms remove max_ttl once restart_requirement is matured                                                                                                                                                                                                                                                       |
+| `name`                                                                                                                                                                                    | string                                                                     | true     |              | Name is the name of the template.                                                                                                                                                                                                                                                                                   |
+| `restart_requirement`                                                                                                                                                                     | [codersdk.TemplateRestartRequirement](#codersdktemplaterestartrequirement) | false    |              | Restart requirement allows optionally specifying the restart requirement for workspaces created from this template. This is an enterprise feature.                                                                                                                                                                  |
+| `template_version_id`                                                                                                                                                                     | string                                                                     | true     |              | Template version ID is an in-progress or completed job to use as an initial version of the template.                                                                                                                                                                                                                |
 | This is required on creation to enable a user-flow of validating a template works. There is no reason the data-model cannot support empty templates, but it doesn't make sense for users. |
 
 ## codersdk.CreateTemplateVersionDryRunRequest
@@ -1405,6 +1461,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 {
   "example_id": "string",
   "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
+  "message": "string",
   "name": "string",
   "provisioner": "terraform",
   "storage_method": "file",
@@ -1428,6 +1485,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | ---------------------- | ---------------------------------------------------------------------- | -------- | ------------ | ------------------------------------------------------------ |
 | `example_id`           | string                                                                 | false    |              |                                                              |
 | `file_id`              | string                                                                 | false    |              |                                                              |
+| `message`              | string                                                                 | false    |              |                                                              |
 | `name`                 | string                                                                 | false    |              |                                                              |
 | `provisioner`          | string                                                                 | true     |              |                                                              |
 | `storage_method`       | [codersdk.ProvisionerStorageMethod](#codersdkprovisionerstoragemethod) | true     |              |                                                              |
@@ -1517,6 +1575,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "disable_login": true,
   "email": "user@example.com",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
   "password": "string",
@@ -1526,12 +1585,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name              | Type   | Required | Restrictions | Description |
-| ----------------- | ------ | -------- | ------------ | ----------- |
-| `email`           | string | true     |              |             |
-| `organization_id` | string | false    |              |             |
-| `password`        | string | true     |              |             |
-| `username`        | string | true     |              |             |
+| Name              | Type    | Required | Restrictions | Description                                                                                                                                               |
+| ----------------- | ------- | -------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disable_login`   | boolean | false    |              | Disable login sets the user's login type to 'none'. This prevents the user from being able to use a password or any other authentication method to login. |
+| `email`           | string  | true     |              |                                                                                                                                                           |
+| `organization_id` | string  | false    |              |                                                                                                                                                           |
+| `password`        | string  | false    |              |                                                                                                                                                           |
+| `username`        | string  | true     |              |                                                                                                                                                           |
 
 ## codersdk.CreateWorkspaceBuildRequest
 
@@ -1661,6 +1721,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "config": {
+    "block_direct": true,
     "path": "string",
     "url": "string"
   },
@@ -1698,6 +1759,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "block_direct": true,
   "path": "string",
   "url": "string"
 }
@@ -1705,10 +1767,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name   | Type   | Required | Restrictions | Description |
-| ------ | ------ | -------- | ------------ | ----------- |
-| `path` | string | false    |              |             |
-| `url`  | string | false    |              |             |
+| Name           | Type    | Required | Restrictions | Description |
+| -------------- | ------- | -------- | ------------ | ----------- |
+| `block_direct` | boolean | false    |              |             |
+| `path`         | string  | false    |              |             |
+| `url`          | string  | false    |              |             |
 
 ## codersdk.DERPRegion
 
@@ -1831,6 +1894,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     },
     "derp": {
       "config": {
+        "block_direct": true,
         "path": "string",
         "url": "string"
       },
@@ -1859,12 +1923,30 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "disable_password_auth": true,
     "disable_path_apps": true,
     "disable_session_expiry_refresh": true,
+    "docs_url": {
+      "forceQuery": true,
+      "fragment": "string",
+      "host": "string",
+      "omitHost": true,
+      "opaque": "string",
+      "path": "string",
+      "rawFragment": "string",
+      "rawPath": "string",
+      "rawQuery": "string",
+      "scheme": "string",
+      "user": {}
+    },
+    "enable_terraform_debug_mode": true,
     "experiments": ["string"],
     "git_auth": {
       "value": [
         {
+          "app_install_url": "string",
+          "app_installations_url": "string",
           "auth_url": "string",
           "client_id": "string",
+          "device_code_url": "string",
+          "device_flow": true,
           "id": "string",
           "no_refresh": true,
           "regex": "string",
@@ -1877,6 +1959,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     },
     "http_address": "string",
     "in_memory_database": true,
+    "job_hang_detector_interval": 0,
     "logging": {
       "human": "string",
       "json": "string",
@@ -1939,14 +2022,17 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "port": "string"
       },
       "collect_agent_stats": true,
+      "collect_db_metrics": true,
       "enable": true
     },
     "provisioner": {
       "daemon_poll_interval": 0,
       "daemon_poll_jitter": 0,
       "daemons": 0,
+      "daemons_echo": true,
       "force_cancel_interval": 0
     },
+    "proxy_health_status_interval": 0,
     "proxy_trusted_headers": ["string"],
     "proxy_trusted_origins": ["string"],
     "rate_limit": {
@@ -2011,6 +2097,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "honeycomb_api_key": "string"
     },
     "update_check": true,
+    "user_quiet_hours_schedule": {
+      "default_schedule": "string"
+    },
     "verbose": true,
     "wgtunnel_host": "string",
     "wildcard_access_url": {
@@ -2052,6 +2141,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       },
       "hidden": true,
       "name": "string",
+      "required": true,
       "use_instead": [{}],
       "value": null,
       "value_source": "",
@@ -2157,6 +2247,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "derp": {
     "config": {
+      "block_direct": true,
       "path": "string",
       "url": "string"
     },
@@ -2185,12 +2276,30 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "disable_password_auth": true,
   "disable_path_apps": true,
   "disable_session_expiry_refresh": true,
+  "docs_url": {
+    "forceQuery": true,
+    "fragment": "string",
+    "host": "string",
+    "omitHost": true,
+    "opaque": "string",
+    "path": "string",
+    "rawFragment": "string",
+    "rawPath": "string",
+    "rawQuery": "string",
+    "scheme": "string",
+    "user": {}
+  },
+  "enable_terraform_debug_mode": true,
   "experiments": ["string"],
   "git_auth": {
     "value": [
       {
+        "app_install_url": "string",
+        "app_installations_url": "string",
         "auth_url": "string",
         "client_id": "string",
+        "device_code_url": "string",
+        "device_flow": true,
         "id": "string",
         "no_refresh": true,
         "regex": "string",
@@ -2203,6 +2312,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "http_address": "string",
   "in_memory_database": true,
+  "job_hang_detector_interval": 0,
   "logging": {
     "human": "string",
     "json": "string",
@@ -2265,14 +2375,17 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "port": "string"
     },
     "collect_agent_stats": true,
+    "collect_db_metrics": true,
     "enable": true
   },
   "provisioner": {
     "daemon_poll_interval": 0,
     "daemon_poll_jitter": 0,
     "daemons": 0,
+    "daemons_echo": true,
     "force_cancel_interval": 0
   },
+  "proxy_health_status_interval": 0,
   "proxy_trusted_headers": ["string"],
   "proxy_trusted_origins": ["string"],
   "rate_limit": {
@@ -2337,6 +2450,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "honeycomb_api_key": "string"
   },
   "update_check": true,
+  "user_quiet_hours_schedule": {
+    "default_schedule": "string"
+  },
   "verbose": true,
   "wgtunnel_host": "string",
   "wildcard_access_url": {
@@ -2375,10 +2491,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `disable_password_auth`              | boolean                                                                                    | false    |              |                                                                    |
 | `disable_path_apps`                  | boolean                                                                                    | false    |              |                                                                    |
 | `disable_session_expiry_refresh`     | boolean                                                                                    | false    |              |                                                                    |
+| `docs_url`                           | [clibase.URL](#clibaseurl)                                                                 | false    |              |                                                                    |
+| `enable_terraform_debug_mode`        | boolean                                                                                    | false    |              |                                                                    |
 | `experiments`                        | array of string                                                                            | false    |              |                                                                    |
 | `git_auth`                           | [clibase.Struct-array_codersdk_GitAuthConfig](#clibasestruct-array_codersdk_gitauthconfig) | false    |              |                                                                    |
 | `http_address`                       | string                                                                                     | false    |              | Http address is a string because it may be set to zero to disable. |
 | `in_memory_database`                 | boolean                                                                                    | false    |              |                                                                    |
+| `job_hang_detector_interval`         | integer                                                                                    | false    |              |                                                                    |
 | `logging`                            | [codersdk.LoggingConfig](#codersdkloggingconfig)                                           | false    |              |                                                                    |
 | `max_session_expiry`                 | integer                                                                                    | false    |              |                                                                    |
 | `max_token_lifetime`                 | integer                                                                                    | false    |              |                                                                    |
@@ -2389,6 +2508,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `pprof`                              | [codersdk.PprofConfig](#codersdkpprofconfig)                                               | false    |              |                                                                    |
 | `prometheus`                         | [codersdk.PrometheusConfig](#codersdkprometheusconfig)                                     | false    |              |                                                                    |
 | `provisioner`                        | [codersdk.ProvisionerConfig](#codersdkprovisionerconfig)                                   | false    |              |                                                                    |
+| `proxy_health_status_interval`       | integer                                                                                    | false    |              |                                                                    |
 | `proxy_trusted_headers`              | array of string                                                                            | false    |              |                                                                    |
 | `proxy_trusted_origins`              | array of string                                                                            | false    |              |                                                                    |
 | `rate_limit`                         | [codersdk.RateLimitConfig](#codersdkratelimitconfig)                                       | false    |              |                                                                    |
@@ -2404,6 +2524,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `tls`                                | [codersdk.TLSConfig](#codersdktlsconfig)                                                   | false    |              |                                                                    |
 | `trace`                              | [codersdk.TraceConfig](#codersdktraceconfig)                                               | false    |              |                                                                    |
 | `update_check`                       | boolean                                                                                    | false    |              |                                                                    |
+| `user_quiet_hours_schedule`          | [codersdk.UserQuietHoursScheduleConfig](#codersdkuserquiethoursscheduleconfig)             | false    |              |                                                                    |
 | `verbose`                            | boolean                                                                                    | false    |              |                                                                    |
 | `wgtunnel_host`                      | string                                                                                     | false    |              |                                                                    |
 | `wildcard_access_url`                | [clibase.URL](#clibaseurl)                                                                 | false    |              |                                                                    |
@@ -2473,11 +2594,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 #### Enumerated Values
 
-| Value               |
-| ------------------- |
-| `moons`             |
-| `workspace_actions` |
-| `workspace_filter`  |
+| Value                          |
+| ------------------------------ |
+| `moons`                        |
+| `workspace_actions`            |
+| `tailnet_ha_coordinator`       |
+| `convert-to-oidc`              |
+| `single_tailnet`               |
+| `template_restart_requirement` |
 
 ## codersdk.Feature
 
@@ -2546,12 +2670,81 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `count` | integer                                 | false    |              |             |
 | `users` | array of [codersdk.User](#codersdkuser) | false    |              |             |
 
+## codersdk.GitAuth
+
+```json
+{
+  "app_install_url": "string",
+  "app_installable": true,
+  "authenticated": true,
+  "device": true,
+  "installations": [
+    {
+      "account": {
+        "avatar_url": "string",
+        "login": "string",
+        "name": "string",
+        "profile_url": "string"
+      },
+      "configure_url": "string",
+      "id": 0
+    }
+  ],
+  "type": "string",
+  "user": {
+    "avatar_url": "string",
+    "login": "string",
+    "name": "string",
+    "profile_url": "string"
+  }
+}
+```
+
+### Properties
+
+| Name              | Type                                                                        | Required | Restrictions | Description                                                             |
+| ----------------- | --------------------------------------------------------------------------- | -------- | ------------ | ----------------------------------------------------------------------- |
+| `app_install_url` | string                                                                      | false    |              | App install URL is the URL to install the app.                          |
+| `app_installable` | boolean                                                                     | false    |              | App installable is true if the request for app installs was successful. |
+| `authenticated`   | boolean                                                                     | false    |              |                                                                         |
+| `device`          | boolean                                                                     | false    |              |                                                                         |
+| `installations`   | array of [codersdk.GitAuthAppInstallation](#codersdkgitauthappinstallation) | false    |              | Installations are the installations that the user has access to.        |
+| `type`            | string                                                                      | false    |              |                                                                         |
+| `user`            | [codersdk.GitAuthUser](#codersdkgitauthuser)                                | false    |              | User is the user that authenticated with the provider.                  |
+
+## codersdk.GitAuthAppInstallation
+
+```json
+{
+  "account": {
+    "avatar_url": "string",
+    "login": "string",
+    "name": "string",
+    "profile_url": "string"
+  },
+  "configure_url": "string",
+  "id": 0
+}
+```
+
+### Properties
+
+| Name            | Type                                         | Required | Restrictions | Description |
+| --------------- | -------------------------------------------- | -------- | ------------ | ----------- |
+| `account`       | [codersdk.GitAuthUser](#codersdkgitauthuser) | false    |              |             |
+| `configure_url` | string                                       | false    |              |             |
+| `id`            | integer                                      | false    |              |             |
+
 ## codersdk.GitAuthConfig
 
 ```json
 {
+  "app_install_url": "string",
+  "app_installations_url": "string",
   "auth_url": "string",
   "client_id": "string",
+  "device_code_url": "string",
+  "device_flow": true,
   "id": "string",
   "no_refresh": true,
   "regex": "string",
@@ -2564,17 +2757,63 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name           | Type            | Required | Restrictions | Description |
-| -------------- | --------------- | -------- | ------------ | ----------- |
-| `auth_url`     | string          | false    |              |             |
-| `client_id`    | string          | false    |              |             |
-| `id`           | string          | false    |              |             |
-| `no_refresh`   | boolean         | false    |              |             |
-| `regex`        | string          | false    |              |             |
-| `scopes`       | array of string | false    |              |             |
-| `token_url`    | string          | false    |              |             |
-| `type`         | string          | false    |              |             |
-| `validate_url` | string          | false    |              |             |
+| Name                    | Type            | Required | Restrictions | Description |
+| ----------------------- | --------------- | -------- | ------------ | ----------- |
+| `app_install_url`       | string          | false    |              |             |
+| `app_installations_url` | string          | false    |              |             |
+| `auth_url`              | string          | false    |              |             |
+| `client_id`             | string          | false    |              |             |
+| `device_code_url`       | string          | false    |              |             |
+| `device_flow`           | boolean         | false    |              |             |
+| `id`                    | string          | false    |              |             |
+| `no_refresh`            | boolean         | false    |              |             |
+| `regex`                 | string          | false    |              |             |
+| `scopes`                | array of string | false    |              |             |
+| `token_url`             | string          | false    |              |             |
+| `type`                  | string          | false    |              |             |
+| `validate_url`          | string          | false    |              |             |
+
+## codersdk.GitAuthDevice
+
+```json
+{
+  "device_code": "string",
+  "expires_in": 0,
+  "interval": 0,
+  "user_code": "string",
+  "verification_uri": "string"
+}
+```
+
+### Properties
+
+| Name               | Type    | Required | Restrictions | Description |
+| ------------------ | ------- | -------- | ------------ | ----------- |
+| `device_code`      | string  | false    |              |             |
+| `expires_in`       | integer | false    |              |             |
+| `interval`         | integer | false    |              |             |
+| `user_code`        | string  | false    |              |             |
+| `verification_uri` | string  | false    |              |             |
+
+## codersdk.GitAuthUser
+
+```json
+{
+  "avatar_url": "string",
+  "login": "string",
+  "name": "string",
+  "profile_url": "string"
+}
+```
+
+### Properties
+
+| Name          | Type   | Required | Restrictions | Description |
+| ------------- | ------ | -------- | ------------ | ----------- |
+| `avatar_url`  | string | false    |              |             |
+| `login`       | string | false    |              |             |
+| `name`        | string | false    |              |             |
+| `profile_url` | string | false    |              |             |
 
 ## codersdk.GitProvider
 
@@ -2671,6 +2910,20 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `interval`  | integer | false    |              | Interval specifies the seconds between each health check.                                        |
 | `threshold` | integer | false    |              | Threshold specifies the number of consecutive failed health checks before returning "unhealthy". |
 | `url`       | string  | false    |              | URL specifies the endpoint to check for the app health.                                          |
+
+## codersdk.InsightsReportInterval
+
+```json
+"day"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value |
+| ----- |
+| `day` |
 
 ## codersdk.IssueReconnectingPTYSignedTokenRequest
 
@@ -2822,6 +3075,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `github`   |
 | `oidc`     |
 | `token`    |
+| `none`     |
 
 ## codersdk.LoginWithPasswordRequest
 
@@ -2900,6 +3154,26 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `client_id`           | string          | false    |              |             |
 | `client_secret`       | string          | false    |              |             |
 | `enterprise_base_url` | string          | false    |              |             |
+
+## codersdk.OAuthConversionResponse
+
+```json
+{
+  "expires_at": "2019-08-24T14:15:22Z",
+  "state_string": "string",
+  "to_type": "password",
+  "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5"
+}
+```
+
+### Properties
+
+| Name           | Type                                     | Required | Restrictions | Description |
+| -------------- | ---------------------------------------- | -------- | ------------ | ----------- |
+| `expires_at`   | string                                   | false    |              |             |
+| `state_string` | string                                   | false    |              |             |
+| `to_type`      | [codersdk.LoginType](#codersdklogintype) | false    |              |             |
+| `user_id`      | string                                   | false    |              |             |
 
 ## codersdk.OIDCAuthMethod
 
@@ -3024,15 +3298,17 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "message": "string",
   "name": "string"
 }
 ```
 
 ### Properties
 
-| Name   | Type   | Required | Restrictions | Description |
-| ------ | ------ | -------- | ------------ | ----------- |
-| `name` | string | false    |              |             |
+| Name      | Type   | Required | Restrictions | Description |
+| --------- | ------ | -------- | ------------ | ----------- |
+| `message` | string | false    |              |             |
+| `name`    | string | false    |              |             |
 
 ## codersdk.PatchWorkspaceProxy
 
@@ -3084,6 +3360,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "port": "string"
   },
   "collect_agent_stats": true,
+  "collect_db_metrics": true,
   "enable": true
 }
 ```
@@ -3094,6 +3371,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | --------------------- | ------------------------------------ | -------- | ------------ | ----------- |
 | `address`             | [clibase.HostPort](#clibasehostport) | false    |              |             |
 | `collect_agent_stats` | boolean                              | false    |              |             |
+| `collect_db_metrics`  | boolean                              | false    |              |             |
 | `enable`              | boolean                              | false    |              |             |
 
 ## codersdk.ProvisionerConfig
@@ -3103,6 +3381,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "daemon_poll_interval": 0,
   "daemon_poll_jitter": 0,
   "daemons": 0,
+  "daemons_echo": true,
   "force_cancel_interval": 0
 }
 ```
@@ -3114,6 +3393,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `daemon_poll_interval`  | integer | false    |              |             |
 | `daemon_poll_jitter`    | integer | false    |              |             |
 | `daemons`               | integer | false    |              |             |
+| `daemons_echo`          | boolean | false    |              |             |
 | `force_cancel_interval` | integer | false    |              |             |
 
 ## codersdk.ProvisionerDaemon
@@ -3158,6 +3438,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "error_code": "MISSING_TEMPLATE_PARAMETER",
   "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "queue_position": 0,
+  "queue_size": 0,
   "started_at": "2019-08-24T14:15:22Z",
   "status": "pending",
   "tags": {
@@ -3179,6 +3461,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `error_code`       | [codersdk.JobErrorCode](#codersdkjoberrorcode)                 | false    |              |             |
 | `file_id`          | string                                                         | false    |              |             |
 | `id`               | string                                                         | false    |              |             |
+| `queue_position`   | integer                                                        | false    |              |             |
+| `queue_size`       | integer                                                        | false    |              |             |
 | `started_at`       | string                                                         | false    |              |             |
 | `status`           | [codersdk.ProvisionerJobStatus](#codersdkprovisionerjobstatus) | false    |              |             |
 | `tags`             | object                                                         | false    |              |             |
@@ -3403,7 +3687,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `path_app_url`      | string  | false    |              | Path app URL is the URL to the base path for path apps. Optional unless wildcard_hostname is set. E.g. https://us.example.com                                                      |
 | `wildcard_hostname` | string  | false    |              | Wildcard hostname is the wildcard hostname for subdomain apps. E.g. _.us.example.com E.g. _--suffix.au.example.com Optional. Does not need to be on the same domain as PathAppURL. |
 
-## codersdk.RegionsResponse
+## codersdk.RegionsResponse-codersdk_Region
 
 ```json
 {
@@ -3426,6 +3710,41 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name      | Type                                        | Required | Restrictions | Description |
 | --------- | ------------------------------------------- | -------- | ------------ | ----------- |
 | `regions` | array of [codersdk.Region](#codersdkregion) | false    |              |             |
+
+## codersdk.RegionsResponse-codersdk_WorkspaceProxy
+
+```json
+{
+  "regions": [
+    {
+      "created_at": "2019-08-24T14:15:22Z",
+      "deleted": true,
+      "display_name": "string",
+      "healthy": true,
+      "icon_url": "string",
+      "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+      "name": "string",
+      "path_app_url": "string",
+      "status": {
+        "checked_at": "2019-08-24T14:15:22Z",
+        "report": {
+          "errors": ["string"],
+          "warnings": ["string"]
+        },
+        "status": "ok"
+      },
+      "updated_at": "2019-08-24T14:15:22Z",
+      "wildcard_hostname": "string"
+    }
+  ]
+}
+```
+
+### Properties
+
+| Name      | Type                                                        | Required | Restrictions | Description |
+| --------- | ----------------------------------------------------------- | -------- | ------------ | ----------- |
+| `regions` | array of [codersdk.WorkspaceProxy](#codersdkworkspaceproxy) | false    |              |             |
 
 ## codersdk.Replica
 
@@ -3474,6 +3793,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `api_key`          |
 | `group`            |
 | `license`          |
+| `convert_login`    |
 
 ## codersdk.Response
 
@@ -3718,45 +4038,90 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "icon": "string",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "inactivity_ttl_ms": 0,
+  "locked_ttl_ms": 0,
   "max_ttl_ms": 0,
   "name": "string",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
   "provisioner": "terraform",
+  "restart_requirement": {
+    "days_of_week": ["monday"],
+    "weeks": 0
+  },
   "updated_at": "2019-08-24T14:15:22Z"
 }
 ```
 
 ### Properties
 
-| Name                               | Type                                                               | Required | Restrictions | Description                                                                                                                                                             |
-| ---------------------------------- | ------------------------------------------------------------------ | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `active_user_count`                | integer                                                            | false    |              | Active user count is set to -1 when loading.                                                                                                                            |
-| `active_version_id`                | string                                                             | false    |              |                                                                                                                                                                         |
-| `allow_user_autostart`             | boolean                                                            | false    |              | Allow user autostart and AllowUserAutostop are enterprise-only. Their values are only used if your license is entitled to use the advanced template scheduling feature. |
-| `allow_user_autostop`              | boolean                                                            | false    |              |                                                                                                                                                                         |
-| `allow_user_cancel_workspace_jobs` | boolean                                                            | false    |              |                                                                                                                                                                         |
-| `build_time_stats`                 | [codersdk.TemplateBuildTimeStats](#codersdktemplatebuildtimestats) | false    |              |                                                                                                                                                                         |
-| `created_at`                       | string                                                             | false    |              |                                                                                                                                                                         |
-| `created_by_id`                    | string                                                             | false    |              |                                                                                                                                                                         |
-| `created_by_name`                  | string                                                             | false    |              |                                                                                                                                                                         |
-| `default_ttl_ms`                   | integer                                                            | false    |              |                                                                                                                                                                         |
-| `description`                      | string                                                             | false    |              |                                                                                                                                                                         |
-| `display_name`                     | string                                                             | false    |              |                                                                                                                                                                         |
-| `failure_ttl_ms`                   | integer                                                            | false    |              | Failure ttl ms and InactivityTTLMillis are enterprise-only. Their values are used if your license is entitled to use the advanced template scheduling feature.          |
-| `icon`                             | string                                                             | false    |              |                                                                                                                                                                         |
-| `id`                               | string                                                             | false    |              |                                                                                                                                                                         |
-| `inactivity_ttl_ms`                | integer                                                            | false    |              |                                                                                                                                                                         |
-| `max_ttl_ms`                       | integer                                                            | false    |              | Max ttl ms is an enterprise feature. It's value is only used if your license is entitled to use the advanced template scheduling feature.                               |
-| `name`                             | string                                                             | false    |              |                                                                                                                                                                         |
-| `organization_id`                  | string                                                             | false    |              |                                                                                                                                                                         |
-| `provisioner`                      | string                                                             | false    |              |                                                                                                                                                                         |
-| `updated_at`                       | string                                                             | false    |              |                                                                                                                                                                         |
+| Name                               | Type                                                                       | Required | Restrictions | Description                                                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `active_user_count`                | integer                                                                    | false    |              | Active user count is set to -1 when loading.                                                                                                                                    |
+| `active_version_id`                | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `allow_user_autostart`             | boolean                                                                    | false    |              | Allow user autostart and AllowUserAutostop are enterprise-only. Their values are only used if your license is entitled to use the advanced template scheduling feature.         |
+| `allow_user_autostop`              | boolean                                                                    | false    |              |                                                                                                                                                                                 |
+| `allow_user_cancel_workspace_jobs` | boolean                                                                    | false    |              |                                                                                                                                                                                 |
+| `build_time_stats`                 | [codersdk.TemplateBuildTimeStats](#codersdktemplatebuildtimestats)         | false    |              |                                                                                                                                                                                 |
+| `created_at`                       | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `created_by_id`                    | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `created_by_name`                  | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `default_ttl_ms`                   | integer                                                                    | false    |              |                                                                                                                                                                                 |
+| `description`                      | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `display_name`                     | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `failure_ttl_ms`                   | integer                                                                    | false    |              | Failure ttl ms InactivityTTLMillis, and LockedTTLMillis are enterprise-only. Their values are used if your license is entitled to use the advanced template scheduling feature. |
+| `icon`                             | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `id`                               | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `inactivity_ttl_ms`                | integer                                                                    | false    |              |                                                                                                                                                                                 |
+| `locked_ttl_ms`                    | integer                                                                    | false    |              |                                                                                                                                                                                 |
+| `max_ttl_ms`                       | integer                                                                    | false    |              | Max ttl ms remove max_ttl once restart_requirement is matured                                                                                                                   |
+| `name`                             | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `organization_id`                  | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `provisioner`                      | string                                                                     | false    |              |                                                                                                                                                                                 |
+| `restart_requirement`              | [codersdk.TemplateRestartRequirement](#codersdktemplaterestartrequirement) | false    |              | Restart requirement is an enterprise feature. Its value is only used if your license is entitled to use the advanced template scheduling feature.                               |
+| `updated_at`                       | string                                                                     | false    |              |                                                                                                                                                                                 |
 
 #### Enumerated Values
 
 | Property      | Value       |
 | ------------- | ----------- |
 | `provisioner` | `terraform` |
+
+## codersdk.TemplateAppUsage
+
+```json
+{
+  "display_name": "Visual Studio Code",
+  "icon": "string",
+  "seconds": 80500,
+  "slug": "vscode",
+  "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+  "type": "builtin"
+}
+```
+
+### Properties
+
+| Name           | Type                                                   | Required | Restrictions | Description |
+| -------------- | ------------------------------------------------------ | -------- | ------------ | ----------- |
+| `display_name` | string                                                 | false    |              |             |
+| `icon`         | string                                                 | false    |              |             |
+| `seconds`      | integer                                                | false    |              |             |
+| `slug`         | string                                                 | false    |              |             |
+| `template_ids` | array of string                                        | false    |              |             |
+| `type`         | [codersdk.TemplateAppsType](#codersdktemplateappstype) | false    |              |             |
+
+## codersdk.TemplateAppsType
+
+```json
+"builtin"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value     |
+| --------- |
+| `builtin` |
 
 ## codersdk.TemplateBuildTimeStats
 
@@ -3804,6 +4169,115 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `name`        | string          | false    |              |             |
 | `tags`        | array of string | false    |              |             |
 | `url`         | string          | false    |              |             |
+
+## codersdk.TemplateInsightsIntervalReport
+
+```json
+{
+  "active_users": 14,
+  "end_time": "2019-08-24T14:15:22Z",
+  "interval": "day",
+  "start_time": "2019-08-24T14:15:22Z",
+  "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"]
+}
+```
+
+### Properties
+
+| Name           | Type                                                               | Required | Restrictions | Description |
+| -------------- | ------------------------------------------------------------------ | -------- | ------------ | ----------- |
+| `active_users` | integer                                                            | false    |              |             |
+| `end_time`     | string                                                             | false    |              |             |
+| `interval`     | [codersdk.InsightsReportInterval](#codersdkinsightsreportinterval) | false    |              |             |
+| `start_time`   | string                                                             | false    |              |             |
+| `template_ids` | array of string                                                    | false    |              |             |
+
+## codersdk.TemplateInsightsReport
+
+```json
+{
+  "active_users": 22,
+  "apps_usage": [
+    {
+      "display_name": "Visual Studio Code",
+      "icon": "string",
+      "seconds": 80500,
+      "slug": "vscode",
+      "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+      "type": "builtin"
+    }
+  ],
+  "end_time": "2019-08-24T14:15:22Z",
+  "start_time": "2019-08-24T14:15:22Z",
+  "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"]
+}
+```
+
+### Properties
+
+| Name           | Type                                                            | Required | Restrictions | Description |
+| -------------- | --------------------------------------------------------------- | -------- | ------------ | ----------- |
+| `active_users` | integer                                                         | false    |              |             |
+| `apps_usage`   | array of [codersdk.TemplateAppUsage](#codersdktemplateappusage) | false    |              |             |
+| `end_time`     | string                                                          | false    |              |             |
+| `start_time`   | string                                                          | false    |              |             |
+| `template_ids` | array of string                                                 | false    |              |             |
+
+## codersdk.TemplateInsightsResponse
+
+```json
+{
+  "interval_reports": [
+    {
+      "active_users": 14,
+      "end_time": "2019-08-24T14:15:22Z",
+      "interval": "day",
+      "start_time": "2019-08-24T14:15:22Z",
+      "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"]
+    }
+  ],
+  "report": {
+    "active_users": 22,
+    "apps_usage": [
+      {
+        "display_name": "Visual Studio Code",
+        "icon": "string",
+        "seconds": 80500,
+        "slug": "vscode",
+        "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+        "type": "builtin"
+      }
+    ],
+    "end_time": "2019-08-24T14:15:22Z",
+    "start_time": "2019-08-24T14:15:22Z",
+    "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"]
+  }
+}
+```
+
+### Properties
+
+| Name               | Type                                                                                        | Required | Restrictions | Description |
+| ------------------ | ------------------------------------------------------------------------------------------- | -------- | ------------ | ----------- |
+| `interval_reports` | array of [codersdk.TemplateInsightsIntervalReport](#codersdktemplateinsightsintervalreport) | false    |              |             |
+| `report`           | [codersdk.TemplateInsightsReport](#codersdktemplateinsightsreport)                          | false    |              |             |
+
+## codersdk.TemplateRestartRequirement
+
+```json
+{
+  "days_of_week": ["monday"],
+  "weeks": 0
+}
+```
+
+### Properties
+
+| Name                                                                                  | Type            | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------- | --------------- | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `days_of_week`                                                                        | array of string | false    |              | Days of week is a list of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required. Weekdays cannot be specified twice.                                                              |
+| Restarts will only happen on weekdays in this list on weeks which line up with Weeks. |
+| `weeks`                                                                               | integer         | false    |              | Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc. |
 
 ## codersdk.TemplateRole
 
@@ -3897,6 +4371,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "error_code": "MISSING_TEMPLATE_PARAMETER",
     "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
     "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+    "queue_position": 0,
+    "queue_size": 0,
     "started_at": "2019-08-24T14:15:22Z",
     "status": "pending",
     "tags": {
@@ -3905,6 +4381,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     },
     "worker_id": "ae5fa6f7-c55b-40c1-b40a-b36ac467652b"
   },
+  "message": "string",
   "name": "string",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
   "readme": "string",
@@ -3922,6 +4399,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `created_by`      | [codersdk.User](#codersdkuser)                                              | false    |              |             |
 | `id`              | string                                                                      | false    |              |             |
 | `job`             | [codersdk.ProvisionerJob](#codersdkprovisionerjob)                          | false    |              |             |
+| `message`         | string                                                                      | false    |              |             |
 | `name`            | string                                                                      | false    |              |             |
 | `organization_id` | string                                                                      | false    |              |             |
 | `readme`          | string                                                                      | false    |              |             |
@@ -3957,8 +4435,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "description": "string",
   "description_plaintext": "string",
   "display_name": "string",
+  "ephemeral": true,
   "icon": "string",
-  "legacy_variable_name": "string",
   "mutable": true,
   "name": "string",
   "options": [
@@ -3987,8 +4465,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `description`           | string                                                                                      | false    |              |             |
 | `description_plaintext` | string                                                                                      | false    |              |             |
 | `display_name`          | string                                                                                      | false    |              |             |
+| `ephemeral`             | boolean                                                                                     | false    |              |             |
 | `icon`                  | string                                                                                      | false    |              |             |
-| `legacy_variable_name`  | string                                                                                      | false    |              |             |
 | `mutable`               | boolean                                                                                     | false    |              |             |
 | `name`                  | string                                                                                      | false    |              |             |
 | `options`               | array of [codersdk.TemplateVersionParameterOption](#codersdktemplateversionparameteroption) | false    |              |             |
@@ -4198,24 +4676,24 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "group_perms": {
-    "property1": "admin",
-    "property2": "admin"
+    "8bd26b20-f3e8-48be-a903-46bb920cf671": "use",
+    "<user_id>>": "admin"
   },
   "user_perms": {
-    "property1": "admin",
-    "property2": "admin"
+    "4df59e74-c027-470b-ab4d-cbba8963a5e9": "use",
+    "<group_id>": "admin"
   }
 }
 ```
 
 ### Properties
 
-| Name               | Type                                           | Required | Restrictions | Description |
-| ------------------ | ---------------------------------------------- | -------- | ------------ | ----------- |
-| `group_perms`      | object                                         | false    |              |             |
-| » `[any property]` | [codersdk.TemplateRole](#codersdktemplaterole) | false    |              |             |
-| `user_perms`       | object                                         | false    |              |             |
-| » `[any property]` | [codersdk.TemplateRole](#codersdktemplaterole) | false    |              |             |
+| Name               | Type                                           | Required | Restrictions | Description                                                                                                                   |
+| ------------------ | ---------------------------------------------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `group_perms`      | object                                         | false    |              | Group perms should be a mapping of group ID to role.                                                                          |
+| » `[any property]` | [codersdk.TemplateRole](#codersdktemplaterole) | false    |              |                                                                                                                               |
+| `user_perms`       | object                                         | false    |              | User perms should be a mapping of user ID to role. The user ID must be the uuid of the user, not a username or email address. |
+| » `[any property]` | [codersdk.TemplateRole](#codersdktemplaterole) | false    |              |                                                                                                                               |
 
 ## codersdk.UpdateUserPasswordRequest
 
@@ -4247,6 +4725,23 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | ---------- | ------ | -------- | ------------ | ----------- |
 | `username` | string | true     |              |             |
 
+## codersdk.UpdateUserQuietHoursScheduleRequest
+
+```json
+{
+  "schedule": "string"
+}
+```
+
+### Properties
+
+| Name       | Type   | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ------ | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule` | string | true     |              | Schedule is a cron expression that defines when the user's quiet hours window is. Schedule must not be empty. For new users, the schedule is set to 2am in their browser or computer's timezone. The schedule denotes the beginning of a 4 hour window where the workspace is allowed to automatically stop or restart due to maintenance or template max TTL. |
+
+The schedule must be daily with a single time, and should have a timezone specified via a CRON_TZ prefix (otherwise UTC will be used).
+If the schedule is empty, the user will be updated to use the default schedule.|
+
 ## codersdk.UpdateWorkspaceAutostartRequest
 
 ```json
@@ -4260,6 +4755,20 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name       | Type   | Required | Restrictions | Description |
 | ---------- | ------ | -------- | ------------ | ----------- |
 | `schedule` | string | false    |              |             |
+
+## codersdk.UpdateWorkspaceLock
+
+```json
+{
+  "lock": true
+}
+```
+
+### Properties
+
+| Name   | Type    | Required | Restrictions | Description |
+| ------ | ------- | -------- | ------------ | ----------- |
+| `lock` | boolean | false    |              |             |
 
 ## codersdk.UpdateWorkspaceRequest
 
@@ -4345,6 +4854,138 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `status` | `active`    |
 | `status` | `suspended` |
 
+## codersdk.UserLatency
+
+```json
+{
+  "latency_ms": {
+    "p50": 31.312,
+    "p95": 119.832
+  },
+  "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+  "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5",
+  "username": "string"
+}
+```
+
+### Properties
+
+| Name           | Type                                                     | Required | Restrictions | Description |
+| -------------- | -------------------------------------------------------- | -------- | ------------ | ----------- |
+| `latency_ms`   | [codersdk.ConnectionLatency](#codersdkconnectionlatency) | false    |              |             |
+| `template_ids` | array of string                                          | false    |              |             |
+| `user_id`      | string                                                   | false    |              |             |
+| `username`     | string                                                   | false    |              |             |
+
+## codersdk.UserLatencyInsightsReport
+
+```json
+{
+  "end_time": "2019-08-24T14:15:22Z",
+  "start_time": "2019-08-24T14:15:22Z",
+  "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+  "users": [
+    {
+      "latency_ms": {
+        "p50": 31.312,
+        "p95": 119.832
+      },
+      "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+      "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5",
+      "username": "string"
+    }
+  ]
+}
+```
+
+### Properties
+
+| Name           | Type                                                  | Required | Restrictions | Description |
+| -------------- | ----------------------------------------------------- | -------- | ------------ | ----------- |
+| `end_time`     | string                                                | false    |              |             |
+| `start_time`   | string                                                | false    |              |             |
+| `template_ids` | array of string                                       | false    |              |             |
+| `users`        | array of [codersdk.UserLatency](#codersdkuserlatency) | false    |              |             |
+
+## codersdk.UserLatencyInsightsResponse
+
+```json
+{
+  "report": {
+    "end_time": "2019-08-24T14:15:22Z",
+    "start_time": "2019-08-24T14:15:22Z",
+    "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+    "users": [
+      {
+        "latency_ms": {
+          "p50": 31.312,
+          "p95": 119.832
+        },
+        "template_ids": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+        "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5",
+        "username": "string"
+      }
+    ]
+  }
+}
+```
+
+### Properties
+
+| Name     | Type                                                                     | Required | Restrictions | Description |
+| -------- | ------------------------------------------------------------------------ | -------- | ------------ | ----------- |
+| `report` | [codersdk.UserLatencyInsightsReport](#codersdkuserlatencyinsightsreport) | false    |              |             |
+
+## codersdk.UserLoginType
+
+```json
+{
+  "login_type": "password"
+}
+```
+
+### Properties
+
+| Name         | Type                                     | Required | Restrictions | Description |
+| ------------ | ---------------------------------------- | -------- | ------------ | ----------- |
+| `login_type` | [codersdk.LoginType](#codersdklogintype) | false    |              |             |
+
+## codersdk.UserQuietHoursScheduleConfig
+
+```json
+{
+  "default_schedule": "string"
+}
+```
+
+### Properties
+
+| Name               | Type   | Required | Restrictions | Description |
+| ------------------ | ------ | -------- | ------------ | ----------- |
+| `default_schedule` | string | false    |              |             |
+
+## codersdk.UserQuietHoursScheduleResponse
+
+```json
+{
+  "next": "2019-08-24T14:15:22Z",
+  "raw_schedule": "string",
+  "time": "string",
+  "timezone": "string",
+  "user_set": true
+}
+```
+
+### Properties
+
+| Name           | Type    | Required | Restrictions | Description                                                                                                            |
+| -------------- | ------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `next`         | string  | false    |              | Next is the next time that the quiet hours window will start.                                                          |
+| `raw_schedule` | string  | false    |              |                                                                                                                        |
+| `time`         | string  | false    |              | Time is the time of day that the quiet hours window starts in the given Timezone each day.                             |
+| `timezone`     | string  | false    |              | raw format from the cron expression, UTC if unspecified                                                                |
+| `user_set`     | boolean | false    |              | User set is true if the user has set their own quiet hours schedule. If false, the user is using the default schedule. |
+
 ## codersdk.UserStatus
 
 ```json
@@ -4414,6 +5055,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "autostart_schedule": "string",
   "created_at": "2019-08-24T14:15:22Z",
   "deleting_at": "2019-08-24T14:15:22Z",
+  "health": {
+    "failing_agents": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+    "healthy": false
+  },
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "last_used_at": "2019-08-24T14:15:22Z",
   "latest_build": {
@@ -4432,6 +5077,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "error_code": "MISSING_TEMPLATE_PARAMETER",
       "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
       "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+      "queue_position": 0,
+      "queue_size": 0,
       "started_at": "2019-08-24T14:15:22Z",
       "status": "pending",
       "tags": {
@@ -4476,6 +5123,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
             },
             "expanded_directory": "string",
             "first_connected_at": "2019-08-24T14:15:22Z",
+            "health": {
+              "healthy": false,
+              "reason": "agent has lost connection"
+            },
             "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
             "instance_id": "string",
             "last_connected_at": "2019-08-24T14:15:22Z",
@@ -4493,12 +5144,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
             "login_before_ready": true,
             "name": "string",
             "operating_system": "string",
+            "ready_at": "2019-08-24T14:15:22Z",
             "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
             "shutdown_script": "string",
             "shutdown_script_timeout_seconds": 0,
+            "started_at": "2019-08-24T14:15:22Z",
             "startup_logs_length": 0,
             "startup_logs_overflowed": true,
             "startup_script": "string",
+            "startup_script_behavior": "blocking",
             "startup_script_timeout_seconds": 0,
             "status": "connecting",
             "subsystem": "envbox",
@@ -4535,6 +5189,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "workspace_owner_id": "e7078695-5279-4c86-8774-3ac2367a2fc7",
     "workspace_owner_name": "string"
   },
+  "locked_at": "2019-08-24T14:15:22Z",
   "name": "string",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
   "outdated": true,
@@ -4552,26 +5207,28 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                                        | Type                                               | Required | Restrictions | Description                                                                                                                                                                                                                  |
-| ------------------------------------------- | -------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `autostart_schedule`                        | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `created_at`                                | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `deleting_at`                               | string                                             | false    |              | Deleting at indicates the time of the upcoming workspace deletion, if applicable; otherwise it is nil. Workspaces may have impending deletions if Template.InactivityTTL feature is turned on and the workspace is inactive. |
-| `id`                                        | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `last_used_at`                              | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `latest_build`                              | [codersdk.WorkspaceBuild](#codersdkworkspacebuild) | false    |              |                                                                                                                                                                                                                              |
-| `name`                                      | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `organization_id`                           | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `outdated`                                  | boolean                                            | false    |              |                                                                                                                                                                                                                              |
-| `owner_id`                                  | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `owner_name`                                | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `template_allow_user_cancel_workspace_jobs` | boolean                                            | false    |              |                                                                                                                                                                                                                              |
-| `template_display_name`                     | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `template_icon`                             | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `template_id`                               | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `template_name`                             | string                                             | false    |              |                                                                                                                                                                                                                              |
-| `ttl_ms`                                    | integer                                            | false    |              |                                                                                                                                                                                                                              |
-| `updated_at`                                | string                                             | false    |              |                                                                                                                                                                                                                              |
+| Name                                        | Type                                                 | Required | Restrictions | Description                                                                                                                                                                                                                                               |
+| ------------------------------------------- | ---------------------------------------------------- | -------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autostart_schedule`                        | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `created_at`                                | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `deleting_at`                               | string                                               | false    |              | Deleting at indicates the time of the upcoming workspace deletion, if applicable; otherwise it is nil. Workspaces may have impending deletions if Template.InactivityTTL feature is turned on and the workspace is inactive.                              |
+| `health`                                    | [codersdk.WorkspaceHealth](#codersdkworkspacehealth) | false    |              | Health shows the health of the workspace and information about what is causing an unhealthy status.                                                                                                                                                       |
+| `id`                                        | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `last_used_at`                              | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `latest_build`                              | [codersdk.WorkspaceBuild](#codersdkworkspacebuild)   | false    |              |                                                                                                                                                                                                                                                           |
+| `locked_at`                                 | string                                               | false    |              | Locked at being non-nil indicates a workspace that has been locked. A locked workspace is no longer accessible by a user and must be unlocked by an admin. It is subject to deletion if it breaches the duration of the locked_ttl field on its template. |
+| `name`                                      | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `organization_id`                           | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `outdated`                                  | boolean                                              | false    |              |                                                                                                                                                                                                                                                           |
+| `owner_id`                                  | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `owner_name`                                | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `template_allow_user_cancel_workspace_jobs` | boolean                                              | false    |              |                                                                                                                                                                                                                                                           |
+| `template_display_name`                     | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `template_icon`                             | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `template_id`                               | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `template_name`                             | string                                               | false    |              |                                                                                                                                                                                                                                                           |
+| `ttl_ms`                                    | integer                                              | false    |              |                                                                                                                                                                                                                                                           |
+| `updated_at`                                | string                                               | false    |              |                                                                                                                                                                                                                                                           |
 
 ## codersdk.WorkspaceAgent
 
@@ -4607,6 +5264,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "expanded_directory": "string",
   "first_connected_at": "2019-08-24T14:15:22Z",
+  "health": {
+    "healthy": false,
+    "reason": "agent has lost connection"
+  },
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "instance_id": "string",
   "last_connected_at": "2019-08-24T14:15:22Z",
@@ -4624,12 +5285,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "login_before_ready": true,
   "name": "string",
   "operating_system": "string",
+  "ready_at": "2019-08-24T14:15:22Z",
   "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
   "shutdown_script": "string",
   "shutdown_script_timeout_seconds": 0,
+  "started_at": "2019-08-24T14:15:22Z",
   "startup_logs_length": 0,
   "startup_logs_overflowed": true,
   "startup_script": "string",
+  "startup_script_behavior": "blocking",
   "startup_script_timeout_seconds": 0,
   "status": "connecting",
   "subsystem": "envbox",
@@ -4641,39 +5305,43 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                              | Type                                                                 | Required | Restrictions | Description                                                                                                                                                                                                |
-| --------------------------------- | -------------------------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps`                            | array of [codersdk.WorkspaceApp](#codersdkworkspaceapp)              | false    |              |                                                                                                                                                                                                            |
-| `architecture`                    | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `connection_timeout_seconds`      | integer                                                              | false    |              |                                                                                                                                                                                                            |
-| `created_at`                      | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `directory`                       | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `disconnected_at`                 | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `environment_variables`           | object                                                               | false    |              |                                                                                                                                                                                                            |
-| » `[any property]`                | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `expanded_directory`              | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `first_connected_at`              | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `id`                              | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `instance_id`                     | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `last_connected_at`               | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `latency`                         | object                                                               | false    |              | Latency is mapped by region name (e.g. "New York City", "Seattle").                                                                                                                                        |
-| » `[any property]`                | [codersdk.DERPRegion](#codersdkderpregion)                           | false    |              |                                                                                                                                                                                                            |
-| `lifecycle_state`                 | [codersdk.WorkspaceAgentLifecycle](#codersdkworkspaceagentlifecycle) | false    |              |                                                                                                                                                                                                            |
-| `login_before_ready`              | boolean                                                              | false    |              | Login before ready if true, the agent will delay logins until it is ready (e.g. executing startup script has ended).                                                                                       |
-| `name`                            | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `operating_system`                | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `resource_id`                     | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `shutdown_script`                 | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `shutdown_script_timeout_seconds` | integer                                                              | false    |              |                                                                                                                                                                                                            |
-| `startup_logs_length`             | integer                                                              | false    |              |                                                                                                                                                                                                            |
-| `startup_logs_overflowed`         | boolean                                                              | false    |              |                                                                                                                                                                                                            |
-| `startup_script`                  | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `startup_script_timeout_seconds`  | integer                                                              | false    |              | Startup script timeout seconds is the number of seconds to wait for the startup script to complete. If the script does not complete within this time, the agent lifecycle will be marked as start_timeout. |
-| `status`                          | [codersdk.WorkspaceAgentStatus](#codersdkworkspaceagentstatus)       | false    |              |                                                                                                                                                                                                            |
-| `subsystem`                       | [codersdk.AgentSubsystem](#codersdkagentsubsystem)                   | false    |              |                                                                                                                                                                                                            |
-| `troubleshooting_url`             | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `updated_at`                      | string                                                               | false    |              |                                                                                                                                                                                                            |
-| `version`                         | string                                                               | false    |              |                                                                                                                                                                                                            |
+| Name                              | Type                                                                                         | Required | Restrictions | Description                                                                                                                                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps`                            | array of [codersdk.WorkspaceApp](#codersdkworkspaceapp)                                      | false    |              |                                                                                                                                                                                                            |
+| `architecture`                    | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `connection_timeout_seconds`      | integer                                                                                      | false    |              |                                                                                                                                                                                                            |
+| `created_at`                      | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `directory`                       | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `disconnected_at`                 | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `environment_variables`           | object                                                                                       | false    |              |                                                                                                                                                                                                            |
+| » `[any property]`                | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `expanded_directory`              | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `first_connected_at`              | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `health`                          | [codersdk.WorkspaceAgentHealth](#codersdkworkspaceagenthealth)                               | false    |              | Health reports the health of the agent.                                                                                                                                                                    |
+| `id`                              | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `instance_id`                     | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `last_connected_at`               | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `latency`                         | object                                                                                       | false    |              | Latency is mapped by region name (e.g. "New York City", "Seattle").                                                                                                                                        |
+| » `[any property]`                | [codersdk.DERPRegion](#codersdkderpregion)                                                   | false    |              |                                                                                                                                                                                                            |
+| `lifecycle_state`                 | [codersdk.WorkspaceAgentLifecycle](#codersdkworkspaceagentlifecycle)                         | false    |              |                                                                                                                                                                                                            |
+| `login_before_ready`              | boolean                                                                                      | false    |              | Deprecated: Use StartupScriptBehavior instead.                                                                                                                                                             |
+| `name`                            | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `operating_system`                | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `ready_at`                        | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `resource_id`                     | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `shutdown_script`                 | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `shutdown_script_timeout_seconds` | integer                                                                                      | false    |              |                                                                                                                                                                                                            |
+| `started_at`                      | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `startup_logs_length`             | integer                                                                                      | false    |              |                                                                                                                                                                                                            |
+| `startup_logs_overflowed`         | boolean                                                                                      | false    |              |                                                                                                                                                                                                            |
+| `startup_script`                  | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `startup_script_behavior`         | [codersdk.WorkspaceAgentStartupScriptBehavior](#codersdkworkspaceagentstartupscriptbehavior) | false    |              |                                                                                                                                                                                                            |
+| `startup_script_timeout_seconds`  | integer                                                                                      | false    |              | Startup script timeout seconds is the number of seconds to wait for the startup script to complete. If the script does not complete within this time, the agent lifecycle will be marked as start_timeout. |
+| `status`                          | [codersdk.WorkspaceAgentStatus](#codersdkworkspaceagentstatus)                               | false    |              |                                                                                                                                                                                                            |
+| `subsystem`                       | [codersdk.AgentSubsystem](#codersdkagentsubsystem)                                           | false    |              |                                                                                                                                                                                                            |
+| `troubleshooting_url`             | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `updated_at`                      | string                                                                                       | false    |              |                                                                                                                                                                                                            |
+| `version`                         | string                                                                                       | false    |              |                                                                                                                                                                                                            |
 
 ## codersdk.WorkspaceAgentConnectionInfo
 
@@ -4729,15 +5397,33 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "regionName": "string"
       }
     }
-  }
+  },
+  "disable_direct_connections": true
 }
 ```
 
 ### Properties
 
-| Name       | Type                               | Required | Restrictions | Description |
-| ---------- | ---------------------------------- | -------- | ------------ | ----------- |
-| `derp_map` | [tailcfg.DERPMap](#tailcfgderpmap) | false    |              |             |
+| Name                         | Type                               | Required | Restrictions | Description |
+| ---------------------------- | ---------------------------------- | -------- | ------------ | ----------- |
+| `derp_map`                   | [tailcfg.DERPMap](#tailcfgderpmap) | false    |              |             |
+| `disable_direct_connections` | boolean                            | false    |              |             |
+
+## codersdk.WorkspaceAgentHealth
+
+```json
+{
+  "healthy": false,
+  "reason": "agent has lost connection"
+}
+```
+
+### Properties
+
+| Name      | Type    | Required | Restrictions | Description                                                                                   |
+| --------- | ------- | -------- | ------------ | --------------------------------------------------------------------------------------------- |
+| `healthy` | boolean | false    |              | Healthy is true if the agent is healthy.                                                      |
+| `reason`  | string  | false    |              | Reason is a human-readable explanation of the agent's health. It is empty if Healthy is true. |
 
 ## codersdk.WorkspaceAgentLifecycle
 
@@ -4840,6 +5526,21 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `id`         | integer                                | false    |              |             |
 | `level`      | [codersdk.LogLevel](#codersdkloglevel) | false    |              |             |
 | `output`     | string                                 | false    |              |             |
+
+## codersdk.WorkspaceAgentStartupScriptBehavior
+
+```json
+"blocking"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value          |
+| -------------- |
+| `blocking`     |
+| `non-blocking` |
 
 ## codersdk.WorkspaceAgentStatus
 
@@ -4956,6 +5657,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "error_code": "MISSING_TEMPLATE_PARAMETER",
     "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
     "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+    "queue_position": 0,
+    "queue_size": 0,
     "started_at": "2019-08-24T14:15:22Z",
     "status": "pending",
     "tags": {
@@ -5000,6 +5703,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
           },
           "expanded_directory": "string",
           "first_connected_at": "2019-08-24T14:15:22Z",
+          "health": {
+            "healthy": false,
+            "reason": "agent has lost connection"
+          },
           "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
           "instance_id": "string",
           "last_connected_at": "2019-08-24T14:15:22Z",
@@ -5017,12 +5724,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
           "login_before_ready": true,
           "name": "string",
           "operating_system": "string",
+          "ready_at": "2019-08-24T14:15:22Z",
           "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
           "shutdown_script": "string",
           "shutdown_script_timeout_seconds": 0,
+          "started_at": "2019-08-24T14:15:22Z",
           "startup_logs_length": 0,
           "startup_logs_overflowed": true,
           "startup_script": "string",
+          "startup_script_behavior": "blocking",
           "startup_script_timeout_seconds": 0,
           "status": "connecting",
           "subsystem": "envbox",
@@ -5170,6 +5880,22 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `stopped`               | integer                                                                        | false    |              |             |
 | `tx_bytes`              | integer                                                                        | false    |              |             |
 
+## codersdk.WorkspaceHealth
+
+```json
+{
+  "failing_agents": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+  "healthy": false
+}
+```
+
+### Properties
+
+| Name             | Type            | Required | Restrictions | Description                                                          |
+| ---------------- | --------------- | -------- | ------------ | -------------------------------------------------------------------- |
+| `failing_agents` | array of string | false    |              | Failing agents lists the IDs of the agents that are failing, if any. |
+| `healthy`        | boolean         | false    |              | Healthy is true if the workspace is healthy.                         |
+
 ## codersdk.WorkspaceProxy
 
 ```json
@@ -5177,9 +5903,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "created_at": "2019-08-24T14:15:22Z",
   "deleted": true,
   "display_name": "string",
-  "icon": "string",
+  "healthy": true,
+  "icon_url": "string",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "name": "string",
+  "path_app_url": "string",
   "status": {
     "checked_at": "2019-08-24T14:15:22Z",
     "report": {
@@ -5189,25 +5917,25 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "status": "ok"
   },
   "updated_at": "2019-08-24T14:15:22Z",
-  "url": "string",
   "wildcard_hostname": "string"
 }
 ```
 
 ### Properties
 
-| Name                | Type                                                           | Required | Restrictions | Description                                                                                                                                                                   |
-| ------------------- | -------------------------------------------------------------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `created_at`        | string                                                         | false    |              |                                                                                                                                                                               |
-| `deleted`           | boolean                                                        | false    |              |                                                                                                                                                                               |
-| `display_name`      | string                                                         | false    |              |                                                                                                                                                                               |
-| `icon`              | string                                                         | false    |              |                                                                                                                                                                               |
-| `id`                | string                                                         | false    |              |                                                                                                                                                                               |
-| `name`              | string                                                         | false    |              |                                                                                                                                                                               |
-| `status`            | [codersdk.WorkspaceProxyStatus](#codersdkworkspaceproxystatus) | false    |              | Status is the latest status check of the proxy. This will be empty for deleted proxies. This value can be used to determine if a workspace proxy is healthy and ready to use. |
-| `updated_at`        | string                                                         | false    |              |                                                                                                                                                                               |
-| `url`               | string                                                         | false    |              | Full URL including scheme of the proxy api url: https://us.example.com                                                                                                        |
-| `wildcard_hostname` | string                                                         | false    |              | Wildcard hostname with the wildcard for subdomain based app hosting: \*.us.example.com                                                                                        |
+| Name                | Type                                                           | Required | Restrictions | Description                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------- | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `created_at`        | string                                                         | false    |              |                                                                                                                                                                                    |
+| `deleted`           | boolean                                                        | false    |              |                                                                                                                                                                                    |
+| `display_name`      | string                                                         | false    |              |                                                                                                                                                                                    |
+| `healthy`           | boolean                                                        | false    |              |                                                                                                                                                                                    |
+| `icon_url`          | string                                                         | false    |              |                                                                                                                                                                                    |
+| `id`                | string                                                         | false    |              |                                                                                                                                                                                    |
+| `name`              | string                                                         | false    |              |                                                                                                                                                                                    |
+| `path_app_url`      | string                                                         | false    |              | Path app URL is the URL to the base path for path apps. Optional unless wildcard_hostname is set. E.g. https://us.example.com                                                      |
+| `status`            | [codersdk.WorkspaceProxyStatus](#codersdkworkspaceproxystatus) | false    |              | Status is the latest status check of the proxy. This will be empty for deleted proxies. This value can be used to determine if a workspace proxy is healthy and ready to use.      |
+| `updated_at`        | string                                                         | false    |              |                                                                                                                                                                                    |
+| `wildcard_hostname` | string                                                         | false    |              | Wildcard hostname is the wildcard hostname for subdomain apps. E.g. _.us.example.com E.g. _--suffix.au.example.com Optional. Does not need to be on the same domain as PathAppURL. |
 
 ## codersdk.WorkspaceProxyStatus
 
@@ -5282,6 +6010,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       },
       "expanded_directory": "string",
       "first_connected_at": "2019-08-24T14:15:22Z",
+      "health": {
+        "healthy": false,
+        "reason": "agent has lost connection"
+      },
       "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
       "instance_id": "string",
       "last_connected_at": "2019-08-24T14:15:22Z",
@@ -5299,12 +6031,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "login_before_ready": true,
       "name": "string",
       "operating_system": "string",
+      "ready_at": "2019-08-24T14:15:22Z",
       "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
       "shutdown_script": "string",
       "shutdown_script_timeout_seconds": 0,
+      "started_at": "2019-08-24T14:15:22Z",
       "startup_logs_length": 0,
       "startup_logs_overflowed": true,
       "startup_script": "string",
+      "startup_script_behavior": "blocking",
       "startup_script_timeout_seconds": 0,
       "status": "connecting",
       "subsystem": "envbox",
@@ -5423,6 +6158,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "autostart_schedule": "string",
       "created_at": "2019-08-24T14:15:22Z",
       "deleting_at": "2019-08-24T14:15:22Z",
+      "health": {
+        "failing_agents": ["497f6eca-6276-4993-bfeb-53cbbbba6f08"],
+        "healthy": false
+      },
       "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
       "last_used_at": "2019-08-24T14:15:22Z",
       "latest_build": {
@@ -5441,6 +6180,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
           "error_code": "MISSING_TEMPLATE_PARAMETER",
           "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
           "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+          "queue_position": 0,
+          "queue_size": 0,
           "started_at": "2019-08-24T14:15:22Z",
           "status": "pending",
           "tags": {
@@ -5481,6 +6222,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
                 },
                 "expanded_directory": "string",
                 "first_connected_at": "2019-08-24T14:15:22Z",
+                "health": {
+                  "healthy": false,
+                  "reason": "agent has lost connection"
+                },
                 "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
                 "instance_id": "string",
                 "last_connected_at": "2019-08-24T14:15:22Z",
@@ -5498,12 +6243,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
                 "login_before_ready": true,
                 "name": "string",
                 "operating_system": "string",
+                "ready_at": "2019-08-24T14:15:22Z",
                 "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
                 "shutdown_script": "string",
                 "shutdown_script_timeout_seconds": 0,
+                "started_at": "2019-08-24T14:15:22Z",
                 "startup_logs_length": 0,
                 "startup_logs_overflowed": true,
                 "startup_script": "string",
+                "startup_script_behavior": "blocking",
                 "startup_script_timeout_seconds": 0,
                 "status": "connecting",
                 "subsystem": "envbox",
@@ -5540,6 +6288,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "workspace_owner_id": "e7078695-5279-4c86-8774-3ac2367a2fc7",
         "workspace_owner_name": "string"
       },
+      "locked_at": "2019-08-24T14:15:22Z",
       "name": "string",
       "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
       "outdated": true,
@@ -5586,7 +6335,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
-  "error": null,
+  "access_url": "string",
+  "error": "string",
   "healthy": true,
   "healthz_response": "string",
   "reachable": true,
@@ -5598,7 +6348,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name               | Type    | Required | Restrictions | Description |
 | ------------------ | ------- | -------- | ------------ | ----------- |
-| `error`            | any     | false    |              |             |
+| `access_url`       | string  | false    |              |             |
+| `error`            | string  | false    |              |             |
 | `healthy`          | boolean | false    |              |             |
 | `healthz_response` | string  | false    |              |             |
 | `reachable`        | boolean | false    |              |             |
@@ -5609,9 +6360,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "can_exchange_messages": true,
-  "client_errs": [[null]],
+  "client_errs": [["string"]],
   "client_logs": [["string"]],
-  "error": null,
+  "error": "string",
   "healthy": true,
   "node": {
     "certName": "string",
@@ -5648,7 +6399,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `can_exchange_messages` | boolean                                                  | false    |              |             |
 | `client_errs`           | array of array                                           | false    |              |             |
 | `client_logs`           | array of array                                           | false    |              |             |
-| `error`                 | any                                                      | false    |              |             |
+| `error`                 | string                                                   | false    |              |             |
 | `healthy`               | boolean                                                  | false    |              |             |
 | `node`                  | [tailcfg.DERPNode](#tailcfgderpnode)                     | false    |              |             |
 | `node_info`             | [derp.ServerInfoMessage](#derpserverinfomessage)         | false    |              |             |
@@ -5660,14 +6411,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
-  "error": null,
+  "error": "string",
   "healthy": true,
   "node_reports": [
     {
       "can_exchange_messages": true,
-      "client_errs": [[null]],
+      "client_errs": [["string"]],
       "client_logs": [["string"]],
-      "error": null,
+      "error": "string",
       "healthy": true,
       "node": {
         "certName": "string",
@@ -5726,7 +6477,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name           | Type                                                              | Required | Restrictions | Description |
 | -------------- | ----------------------------------------------------------------- | -------- | ------------ | ----------- |
-| `error`        | any                                                               | false    |              |             |
+| `error`        | string                                                            | false    |              |             |
 | `healthy`      | boolean                                                           | false    |              |             |
 | `node_reports` | array of [healthcheck.DERPNodeReport](#healthcheckderpnodereport) | false    |              |             |
 | `region`       | [tailcfg.DERPRegion](#tailcfgderpregion)                          | false    |              |             |
@@ -5735,7 +6486,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
-  "error": null,
+  "error": "string",
   "healthy": true,
   "netcheck": {
     "captivePortal": "string",
@@ -5767,18 +6518,18 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "udp": true,
     "upnP": "string"
   },
-  "netcheck_err": null,
+  "netcheck_err": "string",
   "netcheck_logs": ["string"],
   "regions": {
     "property1": {
-      "error": null,
+      "error": "string",
       "healthy": true,
       "node_reports": [
         {
           "can_exchange_messages": true,
-          "client_errs": [[null]],
+          "client_errs": [["string"]],
           "client_logs": [["string"]],
-          "error": null,
+          "error": "string",
           "healthy": true,
           "node": {
             "certName": "string",
@@ -5832,14 +6583,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       }
     },
     "property2": {
-      "error": null,
+      "error": "string",
       "healthy": true,
       "node_reports": [
         {
           "can_exchange_messages": true,
-          "client_errs": [[null]],
+          "client_errs": [["string"]],
           "client_logs": [["string"]],
-          "error": null,
+          "error": "string",
           "healthy": true,
           "node": {
             "certName": "string",
@@ -5900,10 +6651,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name               | Type                                                         | Required | Restrictions | Description |
 | ------------------ | ------------------------------------------------------------ | -------- | ------------ | ----------- |
-| `error`            | any                                                          | false    |              |             |
+| `error`            | string                                                       | false    |              |             |
 | `healthy`          | boolean                                                      | false    |              |             |
 | `netcheck`         | [netcheck.Report](#netcheckreport)                           | false    |              |             |
-| `netcheck_err`     | any                                                          | false    |              |             |
+| `netcheck_err`     | string                                                       | false    |              |             |
 | `netcheck_logs`    | array of string                                              | false    |              |             |
 | `regions`          | object                                                       | false    |              |             |
 | » `[any property]` | [healthcheck.DERPRegionReport](#healthcheckderpregionreport) | false    |              |             |
@@ -5926,19 +6677,47 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `enabled` | boolean | false    |              |             |
 | `error`   | any     | false    |              |             |
 
+## healthcheck.DatabaseReport
+
+```json
+{
+  "error": "string",
+  "healthy": true,
+  "latency": 0,
+  "reachable": true
+}
+```
+
+### Properties
+
+| Name        | Type    | Required | Restrictions | Description |
+| ----------- | ------- | -------- | ------------ | ----------- |
+| `error`     | string  | false    |              |             |
+| `healthy`   | boolean | false    |              |             |
+| `latency`   | integer | false    |              |             |
+| `reachable` | boolean | false    |              |             |
+
 ## healthcheck.Report
 
 ```json
 {
   "access_url": {
-    "error": null,
+    "access_url": "string",
+    "error": "string",
     "healthy": true,
     "healthz_response": "string",
     "reachable": true,
     "status_code": 0
   },
+  "coder_version": "string",
+  "database": {
+    "error": "string",
+    "healthy": true,
+    "latency": 0,
+    "reachable": true
+  },
   "derp": {
-    "error": null,
+    "error": "string",
     "healthy": true,
     "netcheck": {
       "captivePortal": "string",
@@ -5970,18 +6749,18 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "udp": true,
       "upnP": "string"
     },
-    "netcheck_err": null,
+    "netcheck_err": "string",
     "netcheck_logs": ["string"],
     "regions": {
       "property1": {
-        "error": null,
+        "error": "string",
         "healthy": true,
         "node_reports": [
           {
             "can_exchange_messages": true,
-            "client_errs": [[null]],
+            "client_errs": [["string"]],
             "client_logs": [["string"]],
-            "error": null,
+            "error": "string",
             "healthy": true,
             "node": {
               "certName": "string",
@@ -6035,14 +6814,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         }
       },
       "property2": {
-        "error": null,
+        "error": "string",
         "healthy": true,
         "node_reports": [
           {
             "can_exchange_messages": true,
-            "client_errs": [[null]],
+            "client_errs": [["string"]],
             "client_logs": [["string"]],
-            "error": null,
+            "error": "string",
             "healthy": true,
             "node": {
               "certName": "string",
@@ -6101,7 +6880,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "healthy": true,
   "time": "string",
   "websocket": {
-    "error": null,
+    "error": "string",
     "healthy": true,
     "response": {
       "body": "string",
@@ -6113,20 +6892,22 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name               | Type                                                       | Required | Restrictions | Description                                      |
-| ------------------ | ---------------------------------------------------------- | -------- | ------------ | ------------------------------------------------ |
-| `access_url`       | [healthcheck.AccessURLReport](#healthcheckaccessurlreport) | false    |              |                                                  |
-| `derp`             | [healthcheck.DERPReport](#healthcheckderpreport)           | false    |              |                                                  |
-| `failing_sections` | array of string                                            | false    |              |                                                  |
-| `healthy`          | boolean                                                    | false    |              | Healthy is true if the report returns no errors. |
-| `time`             | string                                                     | false    |              | Time is the time the report was generated at.    |
-| `websocket`        | [healthcheck.WebsocketReport](#healthcheckwebsocketreport) | false    |              |                                                  |
+| Name               | Type                                                       | Required | Restrictions | Description                                                                |
+| ------------------ | ---------------------------------------------------------- | -------- | ------------ | -------------------------------------------------------------------------- |
+| `access_url`       | [healthcheck.AccessURLReport](#healthcheckaccessurlreport) | false    |              |                                                                            |
+| `coder_version`    | string                                                     | false    |              | The Coder version of the server that the report was generated on.          |
+| `database`         | [healthcheck.DatabaseReport](#healthcheckdatabasereport)   | false    |              |                                                                            |
+| `derp`             | [healthcheck.DERPReport](#healthcheckderpreport)           | false    |              |                                                                            |
+| `failing_sections` | array of string                                            | false    |              | Failing sections is a list of sections that have failed their healthcheck. |
+| `healthy`          | boolean                                                    | false    |              | Healthy is true if the report returns no errors.                           |
+| `time`             | string                                                     | false    |              | Time is the time the report was generated at.                              |
+| `websocket`        | [healthcheck.WebsocketReport](#healthcheckwebsocketreport) | false    |              |                                                                            |
 
 ## healthcheck.WebsocketReport
 
 ```json
 {
-  "error": null,
+  "error": "string",
   "healthy": true,
   "response": {
     "body": "string",
@@ -6139,7 +6920,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name       | Type                                                           | Required | Restrictions | Description |
 | ---------- | -------------------------------------------------------------- | -------- | ------------ | ----------- |
-| `error`    | any                                                            | false    |              |             |
+| `error`    | string                                                         | false    |              |             |
 | `healthy`  | boolean                                                        | false    |              |             |
 | `response` | [healthcheck.WebsocketResponse](#healthcheckwebsocketresponse) | false    |              |             |
 
@@ -6466,6 +7247,22 @@ _None_
 | `base_path`            | string                                                   | false    |              | Base path of the app. For path apps, this is the path prefix in the router for this particular app. For subdomain apps, this should be "/". This is used for setting the cookie path. |
 | `username_or_id`       | string                                                   | false    |              | For the following fields, if the AccessMethod is AccessMethodTerminal, then only AgentNameOrID may be set and it must be a UUID. The other fields must be left blank.                 |
 | `workspace_name_or_id` | string                                                   | false    |              |                                                                                                                                                                                       |
+
+## wsproxysdk.AgentIsLegacyResponse
+
+```json
+{
+  "found": true,
+  "legacy": true
+}
+```
+
+### Properties
+
+| Name     | Type    | Required | Restrictions | Description |
+| -------- | ------- | -------- | ------------ | ----------- |
+| `found`  | boolean | false    |              |             |
+| `legacy` | boolean | false    |              |             |
 
 ## wsproxysdk.IssueSignedAppTokenResponse
 

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tabbed/pqtype"
+	"github.com/sqlc-dev/pqtype"
 	semconv "go.opentelemetry.io/otel/semconv/v1.14.0"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/maps"
@@ -26,11 +26,11 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 
 	"cdr.dev/slog"
-
 	"github.com/coder/coder/coderd/apikey"
 	"github.com/coder/coder/coderd/audit"
 	"github.com/coder/coder/coderd/database"
 	"github.com/coder/coder/coderd/database/dbauthz"
+	"github.com/coder/coder/coderd/database/pubsub"
 	"github.com/coder/coder/coderd/gitauth"
 	"github.com/coder/coder/coderd/httpmw"
 	"github.com/coder/coder/coderd/schedule"
@@ -49,23 +49,35 @@ var (
 )
 
 type Server struct {
-	AccessURL             *url.URL
-	ID                    uuid.UUID
-	Logger                slog.Logger
-	Provisioners          []database.ProvisionerType
-	GitAuthConfigs        []*gitauth.Config
-	Tags                  json.RawMessage
-	Database              database.Store
-	Pubsub                database.Pubsub
-	Telemetry             telemetry.Reporter
-	Tracer                trace.Tracer
-	QuotaCommitter        *atomic.Pointer[proto.QuotaCommitter]
-	Auditor               *atomic.Pointer[audit.Auditor]
-	TemplateScheduleStore *atomic.Pointer[schedule.TemplateScheduleStore]
-	DeploymentValues      *codersdk.DeploymentValues
+	AccessURL                   *url.URL
+	ID                          uuid.UUID
+	Logger                      slog.Logger
+	Provisioners                []database.ProvisionerType
+	GitAuthConfigs              []*gitauth.Config
+	Tags                        json.RawMessage
+	Database                    database.Store
+	Pubsub                      pubsub.Pubsub
+	Telemetry                   telemetry.Reporter
+	Tracer                      trace.Tracer
+	QuotaCommitter              *atomic.Pointer[proto.QuotaCommitter]
+	Auditor                     *atomic.Pointer[audit.Auditor]
+	TemplateScheduleStore       *atomic.Pointer[schedule.TemplateScheduleStore]
+	UserQuietHoursScheduleStore *atomic.Pointer[schedule.UserQuietHoursScheduleStore]
+	DeploymentValues            *codersdk.DeploymentValues
 
 	AcquireJobDebounce time.Duration
 	OIDCConfig         httpmw.OAuth2Config
+
+	TimeNowFn func() time.Time
+}
+
+// timeNow should be used when trying to get the current time for math
+// calculations regarding workspace start and stop time.
+func (server *Server) timeNow() time.Time {
+	if server.TimeNowFn != nil {
+		return database.Time(server.TimeNowFn())
+	}
+	return database.Now()
 }
 
 // AcquireJob queries the database to lock a job.
@@ -100,14 +112,14 @@ func (server *Server) AcquireJob(ctx context.Context, _ *proto.Empty) (*proto.Ac
 		// The provisioner daemon assumes no jobs are available if
 		// an empty struct is returned.
 		lastAcquireMutex.Lock()
-		lastAcquire = time.Now()
+		lastAcquire = database.Now()
 		lastAcquireMutex.Unlock()
 		return &proto.AcquiredJob{}, nil
 	}
 	if err != nil {
 		return nil, xerrors.Errorf("acquire job: %w", err)
 	}
-	server.Logger.Debug(ctx, "locked job from database", slog.F("id", job.ID))
+	server.Logger.Debug(ctx, "locked job from database", slog.F("job_id", job.ID))
 
 	// Marks the acquired job as failed with the error message provided.
 	failJob := func(errorMessage string) error {
@@ -444,7 +456,7 @@ func (server *Server) UpdateJob(ctx context.Context, request *proto.UpdateJobReq
 	if err != nil {
 		return nil, xerrors.Errorf("parse job id: %w", err)
 	}
-	server.Logger.Debug(ctx, "UpdateJob starting", slog.F("job_id", parsedID))
+	server.Logger.Debug(ctx, "stage UpdateJob starting", slog.F("job_id", parsedID))
 	job, err := server.Database.GetProvisionerJobByID(ctx, parsedID)
 	if err != nil {
 		return nil, xerrors.Errorf("get job: %w", err)
@@ -505,7 +517,7 @@ func (server *Server) UpdateJob(ctx context.Context, request *proto.UpdateJobReq
 		err = server.Pubsub.Publish(provisionersdk.ProvisionerJobLogsNotifyChannel(parsedID), data)
 		if err != nil {
 			server.Logger.Error(ctx, "failed to publish job logs", slog.F("job_id", parsedID), slog.Error(err))
-			return nil, xerrors.Errorf("publish job log: %w", err)
+			return nil, xerrors.Errorf("publish job logs: %w", err)
 		}
 		server.Logger.Debug(ctx, "published job logs", slog.F("job_id", parsedID))
 	}
@@ -591,7 +603,7 @@ func (server *Server) FailJob(ctx context.Context, failJob *proto.FailedJob) (*p
 	if err != nil {
 		return nil, xerrors.Errorf("parse job id: %w", err)
 	}
-	server.Logger.Debug(ctx, "FailJob starting", slog.F("job_id", jobID))
+	server.Logger.Debug(ctx, "stage FailJob starting", slog.F("job_id", jobID))
 	job, err := server.Database.GetProvisionerJobByID(ctx, jobID)
 	if err != nil {
 		return nil, xerrors.Errorf("get provisioner job: %w", err)
@@ -631,9 +643,6 @@ func (server *Server) FailJob(ctx context.Context, failJob *proto.FailedJob) (*p
 
 	switch jobType := failJob.Type.(type) {
 	case *proto.FailedJob_WorkspaceBuild_:
-		if jobType.WorkspaceBuild.State == nil {
-			break
-		}
 		var input WorkspaceProvisionJob
 		err = json.Unmarshal(job.Input, &input)
 		if err != nil {
@@ -641,21 +650,23 @@ func (server *Server) FailJob(ctx context.Context, failJob *proto.FailedJob) (*p
 		}
 
 		var build database.WorkspaceBuild
-		err := server.Database.InTx(func(db database.Store) error {
-			workspaceBuild, err := db.GetWorkspaceBuildByID(ctx, input.WorkspaceBuildID)
+		err = server.Database.InTx(func(db database.Store) error {
+			build, err = db.GetWorkspaceBuildByID(ctx, input.WorkspaceBuildID)
 			if err != nil {
 				return xerrors.Errorf("get workspace build: %w", err)
 			}
 
-			build, err = db.UpdateWorkspaceBuildByID(ctx, database.UpdateWorkspaceBuildByIDParams{
-				ID:               input.WorkspaceBuildID,
-				UpdatedAt:        database.Now(),
-				ProvisionerState: jobType.WorkspaceBuild.State,
-				Deadline:         workspaceBuild.Deadline,
-				MaxDeadline:      workspaceBuild.MaxDeadline,
-			})
-			if err != nil {
-				return xerrors.Errorf("update workspace build state: %w", err)
+			if jobType.WorkspaceBuild.State != nil {
+				_, err = db.UpdateWorkspaceBuildByID(ctx, database.UpdateWorkspaceBuildByIDParams{
+					ID:               input.WorkspaceBuildID,
+					UpdatedAt:        database.Now(),
+					ProvisionerState: jobType.WorkspaceBuild.State,
+					Deadline:         build.Deadline,
+					MaxDeadline:      build.MaxDeadline,
+				})
+				if err != nil {
+					return xerrors.Errorf("update workspace build state: %w", err)
+				}
 			}
 
 			return nil
@@ -745,7 +756,7 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 	if err != nil {
 		return nil, xerrors.Errorf("parse job id: %w", err)
 	}
-	server.Logger.Debug(ctx, "CompleteJob starting", slog.F("job_id", jobID))
+	server.Logger.Debug(ctx, "stage CompleteJob starting", slog.F("job_id", jobID))
 	job, err := server.Database.GetProvisionerJobByID(ctx, jobID)
 	if err != nil {
 		return nil, xerrors.Errorf("get job by id: %w", err)
@@ -788,6 +799,8 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 			server.Logger.Info(ctx, "inserting template import job parameter",
 				slog.F("job_id", job.ID.String()),
 				slog.F("parameter_name", richParameter.Name),
+				slog.F("type", richParameter.Type),
+				slog.F("ephemeral", richParameter.Ephemeral),
 			)
 			options, err := json.Marshal(richParameter.Options)
 			if err != nil {
@@ -824,7 +837,8 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 				ValidationMax:       validationMax,
 				ValidationMonotonic: richParameter.ValidationMonotonic,
 				Required:            richParameter.Required,
-				LegacyVariableName:  richParameter.LegacyVariableName,
+				DisplayOrder:        richParameter.Order,
+				Ephemeral:           richParameter.Ephemeral,
 			})
 			if err != nil {
 				return nil, xerrors.Errorf("insert parameter: %w", err)
@@ -891,15 +905,9 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 		var getWorkspaceError error
 
 		err = server.Database.InTx(func(db database.Store) error {
-			var (
-				now = database.Now()
-				// deadline is the time when the workspace will be stopped. The
-				// value can be bumped by user activity or manually by the user
-				// via the UI.
-				deadline time.Time
-				// maxDeadline is the maximum value for deadline.
-				maxDeadline time.Time
-			)
+			// It's important we use server.timeNow() here because we want to be
+			// able to customize the current time from within tests.
+			now := server.timeNow()
 
 			workspace, getWorkspaceError = db.GetWorkspaceByID(ctx, workspaceBuild.WorkspaceID)
 			if getWorkspaceError != nil {
@@ -910,31 +918,16 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 				)
 				return getWorkspaceError
 			}
-			if workspace.Ttl.Valid {
-				deadline = now.Add(time.Duration(workspace.Ttl.Int64))
-			}
 
-			templateSchedule, err := (*server.TemplateScheduleStore.Load()).GetTemplateScheduleOptions(ctx, db, workspace.TemplateID)
+			autoStop, err := schedule.CalculateAutostop(ctx, schedule.CalculateAutostopParams{
+				Database:                    db,
+				TemplateScheduleStore:       *server.TemplateScheduleStore.Load(),
+				UserQuietHoursScheduleStore: *server.UserQuietHoursScheduleStore.Load(),
+				Now:                         now,
+				Workspace:                   workspace,
+			})
 			if err != nil {
-				return xerrors.Errorf("get template schedule options: %w", err)
-			}
-			if !templateSchedule.UserAutostopEnabled {
-				// The user is not permitted to set their own TTL, so use the
-				// template default.
-				deadline = time.Time{}
-				if templateSchedule.DefaultTTL > 0 {
-					deadline = now.Add(templateSchedule.DefaultTTL)
-				}
-			}
-			if templateSchedule.MaxTTL > 0 {
-				maxDeadline = now.Add(templateSchedule.MaxTTL)
-
-				if deadline.IsZero() || maxDeadline.Before(deadline) {
-					// If the workspace doesn't have a deadline or the max
-					// deadline is sooner than the workspace deadline, use the
-					// max deadline as the actual deadline.
-					deadline = maxDeadline
-				}
+				return xerrors.Errorf("calculate auto stop: %w", err)
 			}
 
 			err = db.UpdateProvisionerJobWithCompleteByID(ctx, database.UpdateProvisionerJobWithCompleteByIDParams{
@@ -950,8 +943,8 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 			}
 			_, err = db.UpdateWorkspaceBuildByID(ctx, database.UpdateWorkspaceBuildByIDParams{
 				ID:               workspaceBuild.ID,
-				Deadline:         deadline,
-				MaxDeadline:      maxDeadline,
+				Deadline:         autoStop.Deadline,
+				MaxDeadline:      autoStop.MaxDeadline,
 				ProvisionerState: jobType.WorkspaceBuild.State,
 				UpdatedAt:        now,
 			})
@@ -1120,7 +1113,7 @@ func (server *Server) CompleteJob(ctx context.Context, completed *proto.Complete
 		return nil, xerrors.Errorf("publish end of job logs: %w", err)
 	}
 
-	server.Logger.Debug(ctx, "CompleteJob done", slog.F("job_id", jobID))
+	server.Logger.Debug(ctx, "stage CompleteJob done", slog.F("job_id", jobID))
 	return &proto.Empty{}, nil
 }
 
@@ -1187,6 +1180,11 @@ func InsertWorkspaceResource(ctx context.Context, db database.Store, jobID uuid.
 			}
 		}
 
+		// Set the default in case it was not provided (e.g. echo provider).
+		if prAgent.GetStartupScriptBehavior() == "" {
+			prAgent.StartupScriptBehavior = string(codersdk.WorkspaceAgentStartupScriptBehaviorNonBlocking)
+		}
+
 		agentID := uuid.New()
 		dbAgent, err := db.InsertWorkspaceAgent(ctx, database.InsertWorkspaceAgentParams{
 			ID:                   agentID,
@@ -1207,7 +1205,7 @@ func InsertWorkspaceResource(ctx context.Context, db database.Store, jobID uuid.
 			ConnectionTimeoutSeconds:    prAgent.GetConnectionTimeoutSeconds(),
 			TroubleshootingURL:          prAgent.GetTroubleshootingUrl(),
 			MOTDFile:                    prAgent.GetMotdFile(),
-			LoginBeforeReady:            prAgent.GetLoginBeforeReady(),
+			StartupScriptBehavior:       database.StartupScriptBehavior(prAgent.GetStartupScriptBehavior()),
 			StartupScriptTimeoutSeconds: prAgent.GetStartupScriptTimeoutSeconds(),
 			ShutdownScript: sql.NullString{
 				String: prAgent.ShutdownScript,

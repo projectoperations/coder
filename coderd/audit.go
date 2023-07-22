@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tabbed/pqtype"
+	"github.com/sqlc-dev/pqtype"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog"
 	"github.com/coder/coder/coderd/audit"
 	"github.com/coder/coder/coderd/database"
+	"github.com/coder/coder/coderd/database/db2sdk"
 	"github.com/coder/coder/coderd/httpapi"
 	"github.com/coder/coder/coderd/httpmw"
 	"github.com/coder/coder/coderd/rbac"
@@ -37,6 +38,7 @@ import (
 // @Router /audit [get]
 func (api *API) auditLogs(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	apiKey := httpmw.APIKey(r)
 
 	page, ok := parsePagination(rw, r)
 	if !ok {
@@ -54,6 +56,11 @@ func (api *API) auditLogs(rw http.ResponseWriter, r *http.Request) {
 	}
 	filter.Offset = int32(page.Offset)
 	filter.Limit = int32(page.Limit)
+
+	if filter.Username == "me" {
+		filter.UserID = apiKey.UserID
+		filter.Username = ""
+	}
 
 	dblogs, err := api.Database.GetAuditLogsOffset(ctx, filter)
 	if err != nil {
@@ -187,7 +194,7 @@ func (api *API) convertAuditLog(ctx context.Context, dblog database.GetAuditLogs
 
 		for _, roleName := range dblog.UserRoles {
 			rbacRole, _ := rbac.RoleByName(roleName)
-			user.Roles = append(user.Roles, convertRole(rbacRole))
+			user.Roles = append(user.Roles, db2sdk.Role(rbacRole))
 		}
 	}
 
@@ -264,6 +271,10 @@ func auditLogDescription(alog database.GetAuditLogsOffsetRow) string {
 	str += fmt.Sprintf(" %s",
 		codersdk.ResourceType(alog.ResourceType).FriendlyString())
 
+	if alog.ResourceType == database.ResourceTypeConvertLogin {
+		str += " to"
+	}
+
 	str += " {target}"
 
 	return str
@@ -277,7 +288,7 @@ func (api *API) auditLogIsResourceDeleted(ctx context.Context, alog database.Get
 			if xerrors.Is(err, sql.ErrNoRows) {
 				return true
 			}
-			api.Logger.Error(ctx, "fetch template", slog.Error(err))
+			api.Logger.Error(ctx, "unable to fetch template", slog.Error(err))
 		}
 		return template.Deleted
 	case database.ResourceTypeUser:
@@ -286,7 +297,7 @@ func (api *API) auditLogIsResourceDeleted(ctx context.Context, alog database.Get
 			if xerrors.Is(err, sql.ErrNoRows) {
 				return true
 			}
-			api.Logger.Error(ctx, "fetch user", slog.Error(err))
+			api.Logger.Error(ctx, "unable to fetch user", slog.Error(err))
 		}
 		return user.Deleted
 	case database.ResourceTypeWorkspace:
@@ -295,7 +306,7 @@ func (api *API) auditLogIsResourceDeleted(ctx context.Context, alog database.Get
 			if xerrors.Is(err, sql.ErrNoRows) {
 				return true
 			}
-			api.Logger.Error(ctx, "fetch workspace", slog.Error(err))
+			api.Logger.Error(ctx, "unable to fetch workspace", slog.Error(err))
 		}
 		return workspace.Deleted
 	case database.ResourceTypeWorkspaceBuild:
@@ -304,7 +315,7 @@ func (api *API) auditLogIsResourceDeleted(ctx context.Context, alog database.Get
 			if xerrors.Is(err, sql.ErrNoRows) {
 				return true
 			}
-			api.Logger.Error(ctx, "fetch workspace build", slog.Error(err))
+			api.Logger.Error(ctx, "unable to fetch workspace build", slog.Error(err))
 		}
 		// We use workspace as a proxy for workspace build here
 		workspace, err := api.Database.GetWorkspaceByID(ctx, workspaceBuild.WorkspaceID)
@@ -312,7 +323,7 @@ func (api *API) auditLogIsResourceDeleted(ctx context.Context, alog database.Get
 			if xerrors.Is(err, sql.ErrNoRows) {
 				return true
 			}
-			api.Logger.Error(ctx, "fetch workspace", slog.Error(err))
+			api.Logger.Error(ctx, "unable to fetch workspace", slog.Error(err))
 		}
 		return workspace.Deleted
 	default:

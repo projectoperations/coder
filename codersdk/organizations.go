@@ -42,7 +42,8 @@ type OrganizationMember struct {
 
 // CreateTemplateVersionRequest enables callers to create a new Template Version.
 type CreateTemplateVersionRequest struct {
-	Name string `json:"name,omitempty" validate:"omitempty,template_version_name"`
+	Name    string `json:"name,omitempty" validate:"omitempty,template_version_name"`
+	Message string `json:"message,omitempty" validate:"lt=1048577"`
 	// TemplateID optionally associates a version with a template.
 	TemplateID      uuid.UUID                `json:"template_id,omitempty" format:"uuid"`
 	StorageMethod   ProvisionerStorageMethod `json:"storage_method" validate:"oneof=file,required" enums:"file"`
@@ -83,9 +84,11 @@ type CreateTemplateRequest struct {
 	// DefaultTTLMillis allows optionally specifying the default TTL
 	// for all workspaces created from this template.
 	DefaultTTLMillis *int64 `json:"default_ttl_ms,omitempty"`
-	// MaxTTLMillis allows optionally specifying the max lifetime for
-	// workspaces created from this template.
+	// TODO(@dean): remove max_ttl once restart_requirement is matured
 	MaxTTLMillis *int64 `json:"max_ttl_ms,omitempty"`
+	// RestartRequirement allows optionally specifying the restart requirement
+	// for workspaces created from this template. This is an enterprise feature.
+	RestartRequirement *TemplateRestartRequirement `json:"restart_requirement,omitempty"`
 
 	// Allow users to cancel in-progress workspace jobs.
 	// *bool as the default value is "true".
@@ -106,8 +109,18 @@ type CreateTemplateRequest struct {
 	// stops all resources for failed workspaces created from this template.
 	FailureTTLMillis *int64 `json:"failure_ttl_ms,omitempty"`
 	// InactivityTTLMillis allows optionally specifying the max lifetime before Coder
-	// deletes inactive workspaces created from this template.
+	// locks inactive workspaces created from this template.
 	InactivityTTLMillis *int64 `json:"inactivity_ttl_ms,omitempty"`
+	// LockedTTLMillis allows optionally specifying the max lifetime before Coder
+	// permanently deletes locked workspaces created from this template.
+	LockedTTLMillis *int64 `json:"locked_ttl_ms,omitempty"`
+
+	// DisableEveryoneGroupAccess allows optionally disabling the default
+	// behavior of granting the 'everyone' group access to use the template.
+	// If this is set to true, the template will not be available to all users,
+	// and must be explicitly granted to users or groups in the permissions settings
+	// of the template.
+	DisableEveryoneGroupAccess bool `json:"disable_everyone_group_access"`
 }
 
 // CreateWorkspaceRequest provides options for creating a new workspace.

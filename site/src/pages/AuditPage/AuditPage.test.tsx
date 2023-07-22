@@ -15,6 +15,7 @@ import { server } from "testHelpers/server"
 
 import * as CreateDayString from "utils/createDayString"
 import AuditPage from "./AuditPage"
+import { DEFAULT_RECORDS_PER_PAGE } from "components/PaginationWidget/utils"
 
 interface RenderPageOptions {
   filter?: string
@@ -67,19 +68,28 @@ describe("AuditPage", () => {
     screen.getByTestId(`audit-log-row-${MockAuditLog2.id}`)
   })
 
-  describe("Filtering", () => {
-    it("filters by typing", async () => {
-      await renderPage()
-      await screen.findByText("updated", { exact: false })
-
-      const filterField = screen.getByLabelText("Filter")
-      const query = "resource_type:workspace action:create"
-      await userEvent.type(filterField, query)
-      await screen.findByText("created", { exact: false })
-      const editWorkspace = screen.queryByText("updated", { exact: false })
-      expect(editWorkspace).not.toBeInTheDocument()
+  it("renders page 5", async () => {
+    // Given
+    const page = 5
+    const getAuditLogsSpy = jest.spyOn(API, "getAuditLogs").mockResolvedValue({
+      audit_logs: [MockAuditLog, MockAuditLog2],
+      count: 2,
     })
 
+    // When
+    await renderPage({ page: page })
+
+    // Then
+    expect(getAuditLogsSpy).toBeCalledWith({
+      limit: DEFAULT_RECORDS_PER_PAGE,
+      offset: DEFAULT_RECORDS_PER_PAGE * (page - 1),
+      q: "",
+    })
+    screen.getByTestId(`audit-log-row-${MockAuditLog.id}`)
+    screen.getByTestId(`audit-log-row-${MockAuditLog2.id}`)
+  })
+
+  describe("Filtering", () => {
     it("filters by URL", async () => {
       const getAuditLogsSpy = jest
         .spyOn(API, "getAuditLogs")
@@ -88,13 +98,18 @@ describe("AuditPage", () => {
       const query = "resource_type:workspace action:create"
       await renderPage({ filter: query })
 
-      expect(getAuditLogsSpy).toBeCalledWith({ limit: 25, offset: 0, q: query })
+      expect(getAuditLogsSpy).toBeCalledWith({
+        limit: DEFAULT_RECORDS_PER_PAGE,
+        offset: 0,
+        q: query,
+      })
     })
 
     it("resets page to 1 when filter is changed", async () => {
       await renderPage({ page: 2 })
 
       const getAuditLogsSpy = jest.spyOn(API, "getAuditLogs")
+      getAuditLogsSpy.mockClear()
 
       const filterField = screen.getByLabelText("Filter")
       const query = "resource_type:workspace action:create"
@@ -102,7 +117,7 @@ describe("AuditPage", () => {
 
       await waitFor(() =>
         expect(getAuditLogsSpy).toBeCalledWith({
-          limit: 25,
+          limit: DEFAULT_RECORDS_PER_PAGE,
           offset: 0,
           q: query,
         }),

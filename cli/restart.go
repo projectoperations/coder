@@ -10,6 +10,8 @@ import (
 )
 
 func (r *RootCmd) restart() *clibase.Cmd {
+	var parameterFlags workspaceParameterFlags
+
 	client := new(codersdk.Client)
 	cmd := &clibase.Cmd{
 		Annotations: workspaceCommand,
@@ -19,22 +21,33 @@ func (r *RootCmd) restart() *clibase.Cmd {
 			clibase.RequireNArgs(1),
 			r.InitClient(client),
 		),
-		Options: clibase.OptionSet{
-			cliui.SkipPromptOption(),
-		},
+		Options: append(parameterFlags.options(), cliui.SkipPromptOption()),
 		Handler: func(inv *clibase.Invocation) error {
 			ctx := inv.Context()
 			out := inv.Stdout
 
-			_, err := cliui.Prompt(inv, cliui.PromptOptions{
-				Text:      "Confirm restart workspace?",
-				IsConfirm: true,
+			workspace, err := namedWorkspace(inv.Context(), client, inv.Args[0])
+			if err != nil {
+				return err
+			}
+
+			template, err := client.Template(inv.Context(), workspace.TemplateID)
+			if err != nil {
+				return err
+			}
+
+			buildParams, err := prepStartWorkspace(inv, client, prepStartWorkspaceArgs{
+				Template:     template,
+				BuildOptions: parameterFlags.buildOptions,
 			})
 			if err != nil {
 				return err
 			}
 
-			workspace, err := namedWorkspace(inv.Context(), client, inv.Args[0])
+			_, err = cliui.Prompt(inv, cliui.PromptOptions{
+				Text:      "Confirm restart workspace?",
+				IsConfirm: true,
+			})
 			if err != nil {
 				return err
 			}
@@ -51,7 +64,8 @@ func (r *RootCmd) restart() *clibase.Cmd {
 			}
 
 			build, err = client.CreateWorkspaceBuild(ctx, workspace.ID, codersdk.CreateWorkspaceBuildRequest{
-				Transition: codersdk.WorkspaceTransitionStart,
+				Transition:          codersdk.WorkspaceTransitionStart,
+				RichParameterValues: buildParams.richParameters,
 			})
 			if err != nil {
 				return err
@@ -61,7 +75,7 @@ func (r *RootCmd) restart() *clibase.Cmd {
 				return err
 			}
 
-			_, _ = fmt.Fprintf(out, "\nThe %s workspace has been restarted at %s!\n", cliui.Styles.Keyword.Render(workspace.Name), cliui.Styles.DateTimeStamp.Render(time.Now().Format(time.Stamp)))
+			_, _ = fmt.Fprintf(out, "\nThe %s workspace has been restarted at %s!\n", cliui.DefaultStyles.Keyword.Render(workspace.Name), cliui.DefaultStyles.DateTimeStamp.Render(time.Now().Format(time.Stamp)))
 			return nil
 		},
 	}

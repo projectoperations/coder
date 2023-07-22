@@ -27,6 +27,9 @@ func (r *RootCmd) provisionerDaemons() *clibase.Cmd {
 	cmd := &clibase.Cmd{
 		Use:   "provisionerd",
 		Short: "Manage provisioner daemons",
+		Handler: func(inv *clibase.Invocation) error {
+			return inv.Command.HelpHandler(inv)
+		},
 		Children: []*clibase.Cmd{
 			r.provisionerDaemonStart(),
 		},
@@ -125,7 +128,7 @@ func (r *RootCmd) provisionerDaemonStart() *clibase.Cmd {
 			select {
 			case <-notifyCtx.Done():
 				exitErr = notifyCtx.Err()
-				_, _ = fmt.Fprintln(inv.Stdout, cliui.Styles.Bold.Render(
+				_, _ = fmt.Fprintln(inv.Stdout, cliui.DefaultStyles.Bold.Render(
 					"Interrupt caught, gracefully exiting. Use ctrl+\\ to force quit",
 				))
 			case exitErr = <-errCh:

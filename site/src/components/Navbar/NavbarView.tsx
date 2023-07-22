@@ -2,7 +2,7 @@ import Drawer from "@mui/material/Drawer"
 import IconButton from "@mui/material/IconButton"
 import List from "@mui/material/List"
 import ListItem from "@mui/material/ListItem"
-import { makeStyles, useTheme } from "@mui/styles"
+import { makeStyles } from "@mui/styles"
 import MenuIcon from "@mui/icons-material/Menu"
 import { CoderIcon } from "components/Icons/CoderIcon"
 import { FC, useRef, useState } from "react"
@@ -20,10 +20,11 @@ import KeyboardArrowDownOutlined from "@mui/icons-material/KeyboardArrowDownOutl
 import { ProxyContextValue } from "contexts/ProxyContext"
 import { displayError } from "components/GlobalSnackbar/utils"
 import Divider from "@mui/material/Divider"
-import HelpOutline from "@mui/icons-material/HelpOutline"
-import Tooltip from "@mui/material/Tooltip"
 import Skeleton from "@mui/material/Skeleton"
 import { BUTTON_SM_HEIGHT } from "theme/theme"
+import { ProxyStatusLatency } from "components/ProxyStatusLatency/ProxyStatusLatency"
+import { usePermissions } from "hooks/usePermissions"
+import Typography from "@mui/material/Typography"
 
 export const USERS_LINK = `/users?filter=${encodeURIComponent("status:active")}`
 
@@ -188,6 +189,7 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
 }) => {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [refetchDate, setRefetchDate] = useState<Date>()
   const selectedProxy = proxyContextValue.proxy.proxy
   const refreshLatencies = proxyContextValue.refetchProxyLatencies
   const closeMenu = () => setIsOpen(false)
@@ -195,6 +197,27 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
   const latencies = proxyContextValue.proxyLatencies
   const isLoadingLatencies = Object.keys(latencies).length === 0
   const isLoading = proxyContextValue.isLoading || isLoadingLatencies
+  const permissions = usePermissions()
+  const proxyLatencyLoading = (proxy: TypesGen.Region): boolean => {
+    if (!refetchDate) {
+      // Only show loading if the user manually requested a refetch
+      return false
+    }
+
+    const latency = latencies?.[proxy.id]
+    // Only show a loading spinner if:
+    //  - A latency exists. This means the latency was fetched at some point, so the
+    //    loader *should* be resolved.
+    //  - The proxy is healthy. If it is not, the loader might never resolve.
+    //  - The latency reported is older than the refetch date. This means the latency
+    //    is stale and we should show a loading spinner until the new latency is
+    //    fetched.
+    if (proxy.healthy && latency && latency.at < refetchDate) {
+      return true
+    }
+
+    return false
+  }
 
   if (isLoading) {
     return (
@@ -232,8 +255,8 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
             </Box>
             {selectedProxy.display_name}
             <ProxyStatusLatency
-              proxy={selectedProxy}
               latency={latencies?.[selectedProxy.id]?.latencyMS}
+              isLoading={proxyLatencyLoading(selectedProxy)}
             />
           </Box>
         ) : (
@@ -247,6 +270,40 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
         onClose={closeMenu}
         sx={{ "& .MuiMenu-paper": { py: 1 } }}
       >
+        <Box
+          sx={{
+            w: "100%",
+            fontSize: 14,
+            padding: 2,
+            maxWidth: "320px",
+            lineHeight: "140%",
+          }}
+        >
+          <Typography
+            component="h4"
+            sx={{
+              fontSize: "inherit",
+              fontWeight: 600,
+              lineHeight: "inherit",
+              margin: 0,
+            }}
+          >
+            Select a region nearest to you
+          </Typography>
+          <Typography
+            component="p"
+            sx={{
+              fontSize: "inherit",
+              color: (theme) => theme.palette.text.secondary,
+              lineHeight: "inherit",
+              marginTop: 0.5,
+            }}
+          >
+            Workspace proxies improve terminal and web app connections to
+            workspaces. This does not apply to SSH connections.
+          </Typography>
+        </Box>
+        <Divider sx={{ borderColor: (theme) => theme.palette.divider }} />
         {proxyContextValue.proxies?.map((proxy) => (
           <MenuItem
             onClick={() => {
@@ -278,22 +335,33 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
               </Box>
               {proxy.display_name}
               <ProxyStatusLatency
-                proxy={proxy}
                 latency={latencies?.[proxy.id]?.latencyMS}
+                isLoading={proxyLatencyLoading(proxy)}
               />
             </Box>
           </MenuItem>
         ))}
         <Divider sx={{ borderColor: (theme) => theme.palette.divider }} />
+        {Boolean(permissions.editWorkspaceProxies) && (
+          <MenuItem
+            sx={{ fontSize: 14 }}
+            onClick={() => {
+              navigate("settings/deployment/workspace-proxies")
+            }}
+          >
+            Proxy settings
+          </MenuItem>
+        )}
         <MenuItem
           sx={{ fontSize: 14 }}
-          onClick={() => {
-            navigate("/settings/workspace-proxies")
+          onClick={(e) => {
+            // Stop the menu from closing
+            e.stopPropagation()
+            // Refresh the latencies.
+            const refetchDate = refreshLatencies()
+            setRefetchDate(refetchDate)
           }}
         >
-          Proxy settings
-        </MenuItem>
-        <MenuItem sx={{ fontSize: 14 }} onClick={refreshLatencies}>
           Refresh Latencies
         </MenuItem>
       </Menu>
@@ -301,43 +369,10 @@ const ProxyMenu: FC<{ proxyContextValue: ProxyContextValue }> = ({
   )
 }
 
-const ProxyStatusLatency: FC<{ proxy: TypesGen.Region; latency?: number }> = ({
-  proxy,
-  latency,
-}) => {
-  const theme = useTheme()
-  let color = theme.palette.success.light
-
-  if (!latency) {
-    return (
-      <Tooltip title="Latency not available">
-        <HelpOutline
-          sx={{
-            ml: "auto",
-            fontSize: "14px !important",
-            color: (theme) => theme.palette.text.secondary,
-          }}
-        />
-      </Tooltip>
-    )
-  }
-
-  if (latency >= 300) {
-    color = theme.palette.error.light
-  }
-
-  if (!proxy.healthy || latency >= 100) {
-    color = theme.palette.warning.light
-  }
-
-  return (
-    <Box sx={{ color, fontSize: 13, marginLeft: "auto" }}>
-      {latency.toFixed(0)}ms
-    </Box>
-  )
-}
-
 const useStyles = makeStyles((theme) => ({
+  displayInitial: {
+    display: "initial",
+  },
   root: {
     height: navHeight,
     background: theme.palette.background.paper,

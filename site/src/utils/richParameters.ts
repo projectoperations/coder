@@ -32,6 +32,10 @@ export const selectInitialRichParametersValues = (
       return
     }
 
+    if (parameter.ephemeral) {
+      parameterValue = parameter.default_value
+    }
+
     if (defaultValuesFromQuery && defaultValuesFromQuery[parameter.name]) {
       parameterValue = defaultValuesFromQuery[parameter.name]
     }
@@ -77,7 +81,7 @@ export const useValidationSchemaForRichParameters = (
                       path: ctx.path,
                       message: t("validationNumberLesserThan", {
                         min: templateParameter.validation_min,
-                      }),
+                      }).toString(),
                     })
                   }
                 } else if (
@@ -89,7 +93,7 @@ export const useValidationSchemaForRichParameters = (
                       path: ctx.path,
                       message: t("validationNumberGreaterThan", {
                         max: templateParameter.validation_max,
-                      }),
+                      }).toString(),
                     })
                   }
                 } else if (
@@ -105,7 +109,7 @@ export const useValidationSchemaForRichParameters = (
                       message: t("validationNumberNotInRange", {
                         min: templateParameter.validation_min,
                         max: templateParameter.validation_max,
-                      }),
+                      }).toString(),
                     })
                   }
                 }
@@ -125,7 +129,7 @@ export const useValidationSchemaForRichParameters = (
                             path: ctx.path,
                             message: t("validationNumberNotIncreasing", {
                               last: lastBuildParameter.value,
-                            }),
+                            }).toString(),
                           })
                         }
                         break
@@ -135,7 +139,7 @@ export const useValidationSchemaForRichParameters = (
                             path: ctx.path,
                             message: t("validationNumberNotDecreasing", {
                               last: lastBuildParameter.value,
-                            }),
+                            }).toString(),
                           })
                         }
                         break
@@ -159,7 +163,7 @@ export const useValidationSchemaForRichParameters = (
                       message: t("validationPatternNotMatched", {
                         error: templateParameter.validation_error,
                         pattern: templateParameter.validation_regex,
-                      }),
+                      }).toString(),
                     })
                   }
                 }
@@ -181,4 +185,22 @@ export const workspaceBuildParameterValue = (
     return buildParameter.name === parameter.name
   })
   return (buildParameter && buildParameter.value) || ""
+}
+
+export const getInitialParameterValues = (
+  templateParameters: TemplateVersionParameter[],
+  buildParameters: WorkspaceBuildParameter[],
+) => {
+  return templateParameters.map((parameter) => {
+    const buildParameter = buildParameters.find(
+      (p) => p.name === parameter.name,
+    )
+    if (!buildParameter || parameter.ephemeral) {
+      return {
+        name: parameter.name,
+        value: parameter.default_value,
+      }
+    }
+    return buildParameter
+  })
 }

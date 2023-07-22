@@ -20,7 +20,6 @@ import (
 
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/slogtest"
-
 	"github.com/coder/coder/provisioner/terraform"
 	"github.com/coder/coder/provisionersdk"
 	"github.com/coder/coder/provisionersdk/proto"
@@ -130,8 +129,7 @@ func TestProvision_Cancel(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx, api := setupProvisioner(t, &provisionerServeOptions{
-				binaryPath:  binPath,
-				exitTimeout: time.Nanosecond,
+				binaryPath: binPath,
 			})
 
 			response, err := api.Provision(ctx)
@@ -184,6 +182,75 @@ func TestProvision_Cancel(t *testing.T) {
 			}
 			require.Equal(t, tt.wantLog, gotLog)
 		})
+	}
+}
+
+func TestProvision_CancelTimeout(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("This test uses interrupts and is not supported on Windows")
+	}
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	fakeBin := filepath.Join(cwd, "testdata", "fake_cancel_hang.sh")
+
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "terraform")
+
+	// Example: exec /path/to/terrafork_fake_cancel.sh 1.2.1 apply "$@"
+	content := fmt.Sprintf("#!/bin/sh\nexec %q %s \"$@\"\n", fakeBin, terraform.TerraformVersion.String())
+	err = os.WriteFile(binPath, []byte(content), 0o755) //#nosec
+	require.NoError(t, err)
+
+	ctx, api := setupProvisioner(t, &provisionerServeOptions{
+		binaryPath:  binPath,
+		exitTimeout: time.Second,
+	})
+
+	response, err := api.Provision(ctx)
+	require.NoError(t, err)
+	err = response.Send(&proto.Provision_Request{
+		Type: &proto.Provision_Request_Apply{
+			Apply: &proto.Provision_Apply{
+				Config: &proto.Provision_Config{
+					Directory: dir,
+					Metadata:  &proto.Provision_Metadata{},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	for _, line := range []string{"init", "apply_start"} {
+	LoopStart:
+		msg, err := response.Recv()
+		require.NoError(t, err)
+
+		t.Log(msg.Type)
+
+		log := msg.GetLog()
+		if log == nil {
+			goto LoopStart
+		}
+		require.Equal(t, line, log.Output)
+	}
+
+	err = response.Send(&proto.Provision_Request{
+		Type: &proto.Provision_Request_Cancel{
+			Cancel: &proto.Provision_Cancel{},
+		},
+	})
+	require.NoError(t, err)
+
+	for {
+		msg, err := response.Recv()
+		require.NoError(t, err)
+
+		if c := msg.GetComplete(); c != nil {
+			require.Contains(t, c.Error, "killed")
+			break
+		}
 	}
 }
 
@@ -255,11 +322,36 @@ func TestProvision(t *testing.T) {
 			Apply: true,
 		},
 		{
+			Name: "single-resource-json",
+			Files: map[string]string{
+				"main.tf.json": `{
+					"resource": {
+						"null_resource": {
+							"A": [
+								{}
+							]
+						}
+					}
+				}`,
+			},
+			Response: &proto.Provision_Response{
+				Type: &proto.Provision_Response_Complete{
+					Complete: &proto.Provision_Complete{
+						Resources: []*proto.Resource{{
+							Name: "A",
+							Type: "null_resource",
+						}},
+					},
+				},
+			},
+			Apply: true,
+		},
+		{
 			Name: "bad-syntax-1",
 			Files: map[string]string{
 				"main.tf": `a`,
 			},
-			ErrorContains:     "initialize terraform",
+			ErrorContains:     "plan terraform",
 			ExpectLogContains: "Argument or block definition required",
 		},
 		{
@@ -267,7 +359,7 @@ func TestProvision(t *testing.T) {
 			Files: map[string]string{
 				"main.tf": `;asdf;`,
 			},
-			ErrorContains:     "initialize terraform",
+			ErrorContains:     "plan terraform",
 			ExpectLogContains: `The ";" character is not valid.`,
 		},
 		{
@@ -317,12 +409,12 @@ func TestProvision(t *testing.T) {
 			Request: &proto.Provision_Plan{
 				RichParameterValues: []*proto.RichParameterValue{
 					{
-						Name:  "Sample",
-						Value: "foofoo",
-					},
-					{
 						Name:  "Example",
 						Value: "foobaz",
+					},
+					{
+						Name:  "Sample",
+						Value: "foofoo",
 					},
 				},
 			},
@@ -331,14 +423,96 @@ func TestProvision(t *testing.T) {
 					Complete: &proto.Provision_Complete{
 						Parameters: []*proto.RichParameter{
 							{
+								Name:         "Example",
+								Type:         "string",
+								DefaultValue: "foobar",
+							},
+							{
 								Name:         "Sample",
 								Type:         "string",
 								DefaultValue: "foobaz",
 							},
+						},
+						Resources: []*proto.Resource{{
+							Name: "example",
+							Type: "null_resource",
+						}},
+					},
+				},
+			},
+		},
+		{
+			Name: "rich-parameter-with-value-json",
+			Files: map[string]string{
+				"main.tf.json": `{
+					"data": {
+						"coder_parameter": {
+							"example": [
+								{
+									"default": "foobar",
+									"name": "Example",
+									"type": "string"
+								}
+							],
+							"sample": [
+								{
+									"default": "foobaz",
+									"name": "Sample",
+									"type": "string"
+								}
+							]
+						}
+					},
+					"resource": {
+						"null_resource": {
+							"example": [
+								{
+									"triggers": {
+										"misc": "${data.coder_parameter.example.value}"
+									}
+								}
+							]
+						}
+					},
+					"terraform": [
+						{
+							"required_providers": [
+								{
+									"coder": {
+										"source": "coder/coder",
+										"version": "0.6.20"
+									}
+								}
+							]
+						}
+					]
+				}`,
+			},
+			Request: &proto.Provision_Plan{
+				RichParameterValues: []*proto.RichParameterValue{
+					{
+						Name:  "Example",
+						Value: "foobaz",
+					},
+					{
+						Name:  "Sample",
+						Value: "foofoo",
+					},
+				},
+			},
+			Response: &proto.Provision_Response{
+				Type: &proto.Provision_Response_Complete{
+					Complete: &proto.Provision_Complete{
+						Parameters: []*proto.RichParameter{
 							{
 								Name:         "Example",
 								Type:         "string",
 								DefaultValue: "foobar",
+							},
+							{
+								Name:         "Sample",
+								Type:         "string",
+								DefaultValue: "foobaz",
 							},
 						},
 						Resources: []*proto.Resource{{

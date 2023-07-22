@@ -2,7 +2,9 @@ package audit
 
 import (
 	"fmt"
+	"os"
 	"reflect"
+	"runtime"
 
 	"github.com/coder/coder/coderd/database"
 	"github.com/coder/coder/codersdk"
@@ -68,15 +70,20 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"description":                      ActionTrack,
 		"icon":                             ActionTrack,
 		"default_ttl":                      ActionTrack,
+		"max_ttl":                          ActionTrack,
+		"restart_requirement_days_of_week": ActionTrack,
+		"restart_requirement_weeks":        ActionTrack,
 		"created_by":                       ActionTrack,
+		"created_by_username":              ActionIgnore,
+		"created_by_avatar_url":            ActionIgnore,
 		"group_acl":                        ActionTrack,
 		"user_acl":                         ActionTrack,
 		"allow_user_autostart":             ActionTrack,
 		"allow_user_autostop":              ActionTrack,
 		"allow_user_cancel_workspace_jobs": ActionTrack,
-		"max_ttl":                          ActionTrack,
 		"failure_ttl":                      ActionTrack,
 		"inactivity_ttl":                   ActionTrack,
+		"locked_ttl":                       ActionTrack,
 	},
 	&database.TemplateVersion{}: {
 		"id":                 ActionTrack,
@@ -85,24 +92,26 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"created_at":         ActionIgnore, // Never changes, but is implicit and not helpful in a diff.
 		"updated_at":         ActionIgnore, // Changes, but is implicit and not helpful in a diff.
 		"name":               ActionTrack,
+		"message":            ActionIgnore, // Never changes after creation.
 		"readme":             ActionTrack,
 		"job_id":             ActionIgnore, // Not helpful in a diff because jobs aren't tracked in audit logs.
 		"created_by":         ActionTrack,
 		"git_auth_providers": ActionIgnore, // Not helpful because this can only change when new versions are added.
 	},
 	&database.User{}: {
-		"id":              ActionTrack,
-		"email":           ActionTrack,
-		"username":        ActionTrack,
-		"hashed_password": ActionSecret, // Do not expose a users hashed password.
-		"created_at":      ActionIgnore, // Never changes.
-		"updated_at":      ActionIgnore, // Changes, but is implicit and not helpful in a diff.
-		"status":          ActionTrack,
-		"rbac_roles":      ActionTrack,
-		"login_type":      ActionIgnore,
-		"avatar_url":      ActionIgnore,
-		"last_seen_at":    ActionIgnore,
-		"deleted":         ActionTrack,
+		"id":                   ActionTrack,
+		"email":                ActionTrack,
+		"username":             ActionTrack,
+		"hashed_password":      ActionSecret, // Do not expose a users hashed password.
+		"created_at":           ActionIgnore, // Never changes.
+		"updated_at":           ActionIgnore, // Changes, but is implicit and not helpful in a diff.
+		"status":               ActionTrack,
+		"rbac_roles":           ActionTrack,
+		"login_type":           ActionTrack,
+		"avatar_url":           ActionIgnore,
+		"last_seen_at":         ActionIgnore,
+		"deleted":              ActionTrack,
+		"quiet_hours_schedule": ActionTrack,
 	},
 	&database.Workspace{}: {
 		"id":                 ActionTrack,
@@ -116,6 +125,8 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"autostart_schedule": ActionTrack,
 		"ttl":                ActionTrack,
 		"last_used_at":       ActionIgnore,
+		"locked_at":          ActionTrack,
+		"deleting_at":        ActionTrack,
 	},
 	&database.WorkspaceBuild{}: {
 		"id":                  ActionIgnore,
@@ -154,6 +165,13 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"ip_address":       ActionIgnore,
 		"scope":            ActionIgnore,
 		"token_name":       ActionIgnore,
+	},
+	&database.AuditOAuthConvertState{}: {
+		"created_at":      ActionTrack,
+		"expires_at":      ActionTrack,
+		"from_login_type": ActionTrack,
+		"to_login_type":   ActionTrack,
+		"user_id":         ActionTrack,
 	},
 	// TODO: track an ID here when the below ticket is completed:
 	// https://github.com/coder/coder/pull/6012
@@ -226,7 +244,9 @@ func entry(v any, f map[string]Action) (string, map[string]Action) {
 			continue
 		}
 		if _, ok := fcpy[jsonTag]; !ok {
-			panic(fmt.Sprintf("audit table entry missing action for field %q in type %q", d.FieldType.Name, name))
+			_, _ = fmt.Fprintf(os.Stderr, "ERROR: Audit table entry missing action for field %q in type %q\nPlease update the auditable resource types in: %s\n", d.FieldType.Name, name, self())
+			//nolint:revive
+			os.Exit(1)
 		}
 		delete(fcpy, jsonTag)
 	}
@@ -242,4 +262,10 @@ func entry(v any, f map[string]Action) (string, map[string]Action) {
 
 func (t Action) String() string {
 	return string(t)
+}
+
+func self() string {
+	//nolint:dogsled
+	_, file, _, _ := runtime.Caller(1)
+	return file
 }

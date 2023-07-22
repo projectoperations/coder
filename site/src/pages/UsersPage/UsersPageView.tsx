@@ -1,10 +1,10 @@
 import { PaginationWidget } from "components/PaginationWidget/PaginationWidget"
-import { FC } from "react"
+import { ComponentProps, FC } from "react"
 import { PaginationMachineRef } from "xServices/pagination/paginationXService"
 import * as TypesGen from "../../api/typesGenerated"
-import { SearchBarWithFilter } from "../../components/SearchBarWithFilter/SearchBarWithFilter"
 import { UsersTable } from "../../components/UsersTable/UsersTable"
-import { userFilterQuery } from "../../utils/filters"
+import { UsersFilter } from "./UsersFilter"
+import { PaginationStatus } from "components/PaginationStatus/PaginationStatus"
 
 export const Language = {
   activeUsersFilterName: "Active users",
@@ -14,21 +14,21 @@ export interface UsersPageViewProps {
   users?: TypesGen.User[]
   count?: number
   roles?: TypesGen.AssignableRoles[]
-  filter?: string
-  error?: unknown
   isUpdatingUserRoles?: boolean
   canEditUsers?: boolean
+  canViewActivity?: boolean
   isLoading?: boolean
   onSuspendUser: (user: TypesGen.User) => void
   onDeleteUser: (user: TypesGen.User) => void
   onListWorkspaces: (user: TypesGen.User) => void
+  onViewActivity: (user: TypesGen.User) => void
   onActivateUser: (user: TypesGen.User) => void
   onResetUserPassword: (user: TypesGen.User) => void
   onUpdateUserRoles: (
     user: TypesGen.User,
     roles: TypesGen.Role["name"][],
   ) => void
-  onFilter: (query: string) => void
+  filterProps: ComponentProps<typeof UsersFilter>
   paginationRef: PaginationMachineRef
   isNonInitialPage: boolean
   actorID: string
@@ -41,31 +41,28 @@ export const UsersPageView: FC<React.PropsWithChildren<UsersPageViewProps>> = ({
   onSuspendUser,
   onDeleteUser,
   onListWorkspaces,
+  onViewActivity,
   onActivateUser,
   onResetUserPassword,
   onUpdateUserRoles,
-  error,
   isUpdatingUserRoles,
   canEditUsers,
+  canViewActivity,
   isLoading,
-  filter,
-  onFilter,
+  filterProps,
   paginationRef,
   isNonInitialPage,
   actorID,
 }) => {
-  const presetFilters = [
-    { query: userFilterQuery.active, name: Language.activeUsersFilterName },
-    { query: userFilterQuery.all, name: Language.allUsersFilterName },
-  ]
-
   return (
     <>
-      <SearchBarWithFilter
-        filter={filter}
-        onFilter={onFilter}
-        presetFilters={presetFilters}
-        error={error}
+      <UsersFilter {...filterProps} />
+
+      <PaginationStatus
+        isLoading={Boolean(isLoading)}
+        showing={users?.length ?? 0}
+        total={count ?? 0}
+        label="users"
       />
 
       <UsersTable
@@ -74,11 +71,13 @@ export const UsersPageView: FC<React.PropsWithChildren<UsersPageViewProps>> = ({
         onSuspendUser={onSuspendUser}
         onDeleteUser={onDeleteUser}
         onListWorkspaces={onListWorkspaces}
+        onViewActivity={onViewActivity}
         onActivateUser={onActivateUser}
         onResetUserPassword={onResetUserPassword}
         onUpdateUserRoles={onUpdateUserRoles}
         isUpdatingUserRoles={isUpdatingUserRoles}
         canEditUsers={canEditUsers}
+        canViewActivity={canViewActivity}
         isLoading={isLoading}
         isNonInitialPage={isNonInitialPage}
         actorID={actorID}

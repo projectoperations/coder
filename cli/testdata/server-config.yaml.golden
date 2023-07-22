@@ -6,6 +6,9 @@ networking:
   # "*.example.com".
   # (default: <unset>, type: url)
   wildcardAccessURL:
+  # Specifies the custom docs URL.
+  # (default: <unset>, type: url)
+  docsURL:
   # Specifies whether to redirect requests that do not match the access URL host.
   # (default: <unset>, type: bool)
   redirectToAccessURL: false
@@ -33,6 +36,9 @@ networking:
     # directly in the database.
     # (default: <unset>, type: bool)
     disablePasswordAuth: false
+    # The interval in which coderd should be checking the status of workspace proxies.
+    # (default: 1m0s, type: duration)
+    proxyHealthInterval: 1m0s
   # Configure TLS / HTTPS for your Coder deployment. If you're running
   #  Coder behind a TLS-terminating reverse proxy or are accessing Coder over a
   #  secure link, you can safely ignore these settings.
@@ -114,6 +120,13 @@ networking:
     # for high availability.
     # (default: <unset>, type: url)
     relayURL:
+    # Block peer-to-peer (aka. direct) workspace connections. All workspace
+    # connections from the CLI will be proxied through Coder (or custom configured
+    # DERP servers) and will never be peer-to-peer when enabled. Workspaces may still
+    # reach out to STUN servers to get their address until they are restarted after
+    # this change has been made, but new connections will still be proxied regardless.
+    # (default: <unset>, type: bool)
+    blockDirect: false
     # URL to fetch a DERP mapping on startup. See:
     # https://tailscale.com/kb/1118/custom-derp-servers/.
     # (default: <unset>, type: string)
@@ -138,6 +151,9 @@ networking:
 # Interval to poll for scheduled workspace builds.
 # (default: 1m0s, type: duration)
 autobuildPollInterval: 1m0s
+# Interval to poll for hung jobs and automatically terminate them.
+# (default: 1m0s, type: duration)
+jobHangDetectorInterval: 1m0s
 introspection:
   prometheus:
     # Serve prometheus metrics on the address defined by prometheus address.
@@ -149,6 +165,9 @@ introspection:
     # Collect agent stats (may increase charges for metrics storage).
     # (default: <unset>, type: bool)
     collect_agent_stats: false
+    # Collect database metrics (may increase charges for metrics storage).
+    # (default: false, type: bool)
+    collect_db_metrics: false
   pprof:
     # Serve pprof metrics on the address defined by pprof address.
     # (default: <unset>, type: bool)
@@ -181,6 +200,9 @@ introspection:
     # Output Stackdriver compatible logs to a given file.
     # (default: <unset>, type: string)
     stackdriverPath: ""
+    # Allow administrators to enable Terraform debug output.
+    # (default: false, type: bool)
+    enableTerraformDebugMode: false
 oauth2:
   github:
     # Client ID for Login with GitHub.
@@ -238,8 +260,8 @@ oidc:
   # Ignore the userinfo endpoint and only use the ID token for user information.
   # (default: false, type: bool)
   ignoreUserInfo: false
-  # Change the OIDC default 'groups' claim field. By default, will be 'groups' if
-  # present in the oidc scopes argument.
+  # This field must be set if using the group sync feature and the scope name is not
+  # 'groups'. Set to the claim to be used for groups.
   # (default: <unset>, type: string)
   groupField: ""
   # A map of OIDC group IDs and the group in Coder it should map to. This is useful
@@ -275,6 +297,10 @@ provisioning:
   # state for a long time, consider increasing this.
   # (default: 3, type: int)
   daemons: 3
+  # Whether to use echo provisioner daemons instead of Terraform. This is for E2E
+  # tests.
+  # (default: false, type: bool)
+  daemonsEcho: false
   # Time to wait before polling for a new job.
   # (default: 1s, type: duration)
   daemonPollInterval: 1s
@@ -343,3 +369,15 @@ supportLinks: []
 # "tunnel.example.com".
 # (default: <unset>, type: string)
 wgtunnelHost: ""
+# Allow users to set quiet hours schedules each day for workspaces to avoid
+# workspaces stopping during the day due to template max TTL.
+userQuietHoursSchedule:
+  # The default daily cron schedule applied to users that haven't set a custom quiet
+  # hours schedule themselves. The quiet hours schedule determines when workspaces
+  # will be force stopped due to the template's max TTL, and will round the max TTL
+  # up to be within the user's quiet hours window (or default). The format is the
+  # same as the standard cron format, but the day-of-month, month and day-of-week
+  # must be *. Only one hour and minute can be specified (ranges or comma separated
+  # values are not supported).
+  # (default: <unset>, type: string)
+  defaultQuietHoursSchedule: ""

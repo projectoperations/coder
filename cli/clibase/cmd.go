@@ -333,6 +333,18 @@ func (inv *Invocation) run(state *runState) error {
 		)
 	}
 
+	// All options should be set. Check all required options have sources,
+	// meaning they were set by the user in some way (env, flag, etc).
+	var missing []string
+	for _, opt := range inv.Command.Options {
+		if opt.Required && opt.ValueSource == ValueSourceNone {
+			missing = append(missing, opt.Flag)
+		}
+	}
+	if len(missing) > 0 {
+		return xerrors.Errorf("Missing values for the required flags: %s", strings.Join(missing, ", "))
+	}
+
 	if inv.Command.RawArgs {
 		// If we're at the root command, then the name is omitted
 		// from the arguments, so we can just use the entire slice.
@@ -447,6 +459,19 @@ func (inv *Invocation) Run() (err error) {
 			err = xerrors.Errorf("panic recovered for %s: %v", inv.Command.FullName(), r)
 			panic(err)
 		}
+	}()
+	// We close Stdin to prevent deadlocks, e.g. when the command
+	// has ended but an io.Copy is still reading from Stdin.
+	defer func() {
+		if inv.Stdin == nil {
+			return
+		}
+		rc, ok := inv.Stdin.(io.ReadCloser)
+		if !ok {
+			return
+		}
+		e := rc.Close()
+		err = errors.Join(err, e)
 	}()
 	err = inv.run(&runState{
 		allArgs: inv.Args,

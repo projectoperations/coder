@@ -45,6 +45,7 @@ const (
 	FeatureExternalProvisionerDaemons FeatureName = "external_provisioner_daemons"
 	FeatureAppearance                 FeatureName = "appearance"
 	FeatureAdvancedTemplateScheduling FeatureName = "advanced_template_scheduling"
+	FeatureTemplateRestartRequirement FeatureName = "template_restart_requirement"
 	FeatureWorkspaceProxy             FeatureName = "workspace_proxy"
 )
 
@@ -120,10 +121,12 @@ type DeploymentValues struct {
 	Verbose             clibase.Bool `json:"verbose,omitempty"`
 	AccessURL           clibase.URL  `json:"access_url,omitempty"`
 	WildcardAccessURL   clibase.URL  `json:"wildcard_access_url,omitempty"`
+	DocsURL             clibase.URL  `json:"docs_url,omitempty"`
 	RedirectToAccessURL clibase.Bool `json:"redirect_to_access_url,omitempty"`
 	// HTTPAddress is a string because it may be set to zero to disable.
 	HTTPAddress                     clibase.String                  `json:"http_address,omitempty" typescript:",notnull"`
 	AutobuildPollInterval           clibase.Duration                `json:"autobuild_poll_interval,omitempty"`
+	JobHangDetectorInterval         clibase.Duration                `json:"job_hang_detector_interval,omitempty"`
 	DERP                            DERP                            `json:"derp,omitempty" typescript:",notnull"`
 	Prometheus                      PrometheusConfig                `json:"prometheus,omitempty" typescript:",notnull"`
 	Pprof                           PprofConfig                     `json:"pprof,omitempty" typescript:",notnull"`
@@ -163,6 +166,9 @@ type DeploymentValues struct {
 	SSHConfig                       SSHConfig                       `json:"config_ssh,omitempty" typescript:",notnull"`
 	WgtunnelHost                    clibase.String                  `json:"wgtunnel_host,omitempty" typescript:",notnull"`
 	DisableOwnerWorkspaceExec       clibase.Bool                    `json:"disable_owner_workspace_exec,omitempty" typescript:",notnull"`
+	ProxyHealthStatusInterval       clibase.Duration                `json:"proxy_health_status_interval,omitempty" typescript:",notnull"`
+	EnableTerraformDebugMode        clibase.Bool                    `json:"enable_terraform_debug_mode,omitempty" typescript:",notnull"`
+	UserQuietHoursSchedule          UserQuietHoursScheduleConfig    `json:"user_quiet_hours_schedule,omitempty" typescript:",notnull"`
 
 	Config      clibase.YAMLConfigPath `json:"config,omitempty" typescript:",notnull"`
 	WriteConfig clibase.Bool           `json:"write_config,omitempty" typescript:",notnull"`
@@ -220,14 +226,16 @@ type DERPServerConfig struct {
 }
 
 type DERPConfig struct {
-	URL  clibase.String `json:"url" typescript:",notnull"`
-	Path clibase.String `json:"path" typescript:",notnull"`
+	BlockDirect clibase.Bool   `json:"block_direct" typescript:",notnull"`
+	URL         clibase.String `json:"url" typescript:",notnull"`
+	Path        clibase.String `json:"path" typescript:",notnull"`
 }
 
 type PrometheusConfig struct {
 	Enable            clibase.Bool     `json:"enable" typescript:",notnull"`
 	Address           clibase.HostPort `json:"address" typescript:",notnull"`
 	CollectAgentStats clibase.Bool     `json:"collect_agent_stats" typescript:",notnull"`
+	CollectDBMetrics  clibase.Bool     `json:"collect_db_metrics" typescript:",notnull"`
 }
 
 type PprofConfig struct {
@@ -293,20 +301,25 @@ type TraceConfig struct {
 }
 
 type GitAuthConfig struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type"`
-	ClientID     string   `json:"client_id"`
-	ClientSecret string   `json:"-" yaml:"client_secret"`
-	AuthURL      string   `json:"auth_url"`
-	TokenURL     string   `json:"token_url"`
-	ValidateURL  string   `json:"validate_url"`
-	Regex        string   `json:"regex"`
-	NoRefresh    bool     `json:"no_refresh"`
-	Scopes       []string `json:"scopes"`
+	ID                  string   `json:"id"`
+	Type                string   `json:"type"`
+	ClientID            string   `json:"client_id"`
+	ClientSecret        string   `json:"-" yaml:"client_secret"`
+	AuthURL             string   `json:"auth_url"`
+	TokenURL            string   `json:"token_url"`
+	ValidateURL         string   `json:"validate_url"`
+	AppInstallURL       string   `json:"app_install_url"`
+	AppInstallationsURL string   `json:"app_installations_url"`
+	Regex               string   `json:"regex"`
+	NoRefresh           bool     `json:"no_refresh"`
+	Scopes              []string `json:"scopes"`
+	DeviceFlow          bool     `json:"device_flow"`
+	DeviceCodeURL       string   `json:"device_code_url"`
 }
 
 type ProvisionerConfig struct {
 	Daemons             clibase.Int64    `json:"daemons" typescript:",notnull"`
+	DaemonsEcho         clibase.Bool     `json:"daemons_echo" typescript:",notnull"`
 	DaemonPollInterval  clibase.Duration `json:"daemon_poll_interval" typescript:",notnull"`
 	DaemonPollJitter    clibase.Duration `json:"daemon_poll_jitter" typescript:",notnull"`
 	ForceCancelInterval clibase.Duration `json:"force_cancel_interval" typescript:",notnull"`
@@ -331,6 +344,13 @@ type DangerousConfig struct {
 	AllowPathAppSharing         clibase.Bool `json:"allow_path_app_sharing" typescript:",notnull"`
 	AllowPathAppSiteOwnerAccess clibase.Bool `json:"allow_path_app_site_owner_access" typescript:",notnull"`
 	AllowAllCors                clibase.Bool `json:"allow_all_cors" typescript:",notnull"`
+}
+
+type UserQuietHoursScheduleConfig struct {
+	DefaultSchedule clibase.String `json:"default_schedule" typescript:",notnull"`
+	// TODO: add WindowDuration and the ability to postpone max_deadline by this
+	// amount
+	// WindowDuration  clibase.Duration `json:"window_duration" typescript:",notnull"`
 }
 
 const (
@@ -456,6 +476,11 @@ when required by your organization's security policy.`,
 			Description: `Tune the behavior of the provisioner, which is responsible for creating, updating, and deleting workspace resources.`,
 			YAML:        "provisioning",
 		}
+		deploymentGroupUserQuietHoursSchedule = clibase.Group{
+			Name:        "User Quiet Hours Schedule",
+			Description: "Allow users to set quiet hours schedules each day for workspaces to avoid workspaces stopping during the day due to template max TTL.",
+			YAML:        "userQuietHoursSchedule",
+		}
 		deploymentGroupDangerous = clibase.Group{
 			Name: "⚠️ Dangerous",
 			YAML: "dangerous",
@@ -524,6 +549,16 @@ when required by your organization's security policy.`,
 			YAML:        "wildcardAccessURL",
 			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
 		},
+		{
+			Name:        "Docs URL",
+			Description: "Specifies the custom docs URL.",
+			Value:       &c.DocsURL,
+			Flag:        "docs-url",
+			Env:         "CODER_DOCS_URL",
+			Group:       &deploymentGroupNetworking,
+			YAML:        "docsURL",
+			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
+		},
 		redirectToAccessURL,
 		{
 			Name:        "Autobuild Poll Interval",
@@ -534,6 +569,16 @@ when required by your organization's security policy.`,
 			Default:     time.Minute.String(),
 			Value:       &c.AutobuildPollInterval,
 			YAML:        "autobuildPollInterval",
+		},
+		{
+			Name:        "Job Hang Detector Interval",
+			Description: "Interval to poll for hung jobs and automatically terminate them.",
+			Flag:        "job-hang-detector-interval",
+			Env:         "CODER_JOB_HANG_DETECTOR_INTERVAL",
+			Hidden:      true,
+			Default:     time.Minute.String(),
+			Value:       &c.JobHangDetectorInterval,
+			YAML:        "jobHangDetectorInterval",
 		},
 		httpAddress,
 		tlsBindAddress,
@@ -710,6 +755,18 @@ when required by your organization's security policy.`,
 			YAML:        "relayURL",
 		},
 		{
+			Name:        "Block Direct Connections",
+			Description: "Block peer-to-peer (aka. direct) workspace connections. All workspace connections from the CLI will be proxied through Coder (or custom configured DERP servers) and will never be peer-to-peer when enabled. Workspaces may still reach out to STUN servers to get their address until they are restarted after this change has been made, but new connections will still be proxied regardless.",
+			// This cannot be called `disable-direct-connections` because that's
+			// already a global CLI flag for CLI connections. This is a
+			// deployment-wide flag.
+			Flag:  "block-direct-connections",
+			Env:   "CODER_BLOCK_DIRECT",
+			Value: &c.DERP.Config.BlockDirect,
+			Group: &deploymentGroupNetworkingDERP,
+			YAML:  "blockDirect",
+		},
+		{
 			Name:        "DERP Config URL",
 			Description: "URL to fetch a DERP mapping on startup. See: https://tailscale.com/kb/1118/custom-derp-servers/.",
 			Flag:        "derp-config-url",
@@ -758,6 +815,16 @@ when required by your organization's security policy.`,
 			Value:       &c.Prometheus.CollectAgentStats,
 			Group:       &deploymentGroupIntrospectionPrometheus,
 			YAML:        "collect_agent_stats",
+		},
+		{
+			Name:        "Prometheus Collect Database Metrics",
+			Description: "Collect database metrics (may increase charges for metrics storage).",
+			Flag:        "prometheus-collect-db-metrics",
+			Env:         "CODER_PROMETHEUS_COLLECT_DB_METRICS",
+			Value:       &c.Prometheus.CollectDBMetrics,
+			Group:       &deploymentGroupIntrospectionPrometheus,
+			YAML:        "collect_db_metrics",
+			Default:     "false",
 		},
 		// Pprof settings
 		{
@@ -953,7 +1020,7 @@ when required by your organization's security policy.`,
 		},
 		{
 			Name:        "OIDC Group Field",
-			Description: "Change the OIDC default 'groups' claim field. By default, will be 'groups' if present in the oidc scopes argument.",
+			Description: "This field must be set if using the group sync feature and the scope name is not 'groups'. Set to the claim to be used for groups.",
 			Flag:        "oidc-group-field",
 			Env:         "CODER_OIDC_GROUP_FIELD",
 			// This value is intentionally blank. If this is empty, then OIDC group
@@ -1069,6 +1136,17 @@ when required by your organization's security policy.`,
 			YAML:        "daemons",
 		},
 		{
+			Name:        "Echo Provisioner",
+			Description: "Whether to use echo provisioner daemons instead of Terraform. This is for E2E tests.",
+			Flag:        "provisioner-daemons-echo",
+			Env:         "CODER_PROVISIONER_DAEMONS_ECHO",
+			Hidden:      true,
+			Default:     "false",
+			Value:       &c.Provisioner.DaemonsEcho,
+			Group:       &deploymentGroupProvisioning,
+			YAML:        "daemonsEcho",
+		},
+		{
 			Name:        "Poll Interval",
 			Description: "Time to wait before polling for a new job.",
 			Flag:        "provisioner-daemon-poll-interval",
@@ -1167,10 +1245,20 @@ when required by your organization's security policy.`,
 			YAML:        "stackdriverPath",
 			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
 		},
+		{
+			Name:        "Enable Terraform debug mode",
+			Description: "Allow administrators to enable Terraform debug output.",
+			Flag:        "enable-terraform-debug-mode",
+			Env:         "CODER_ENABLE_TERRAFORM_DEBUG_MODE",
+			Default:     "false",
+			Value:       &c.EnableTerraformDebugMode,
+			Group:       &deploymentGroupIntrospectionLogging,
+			YAML:        "enableTerraformDebugMode",
+		},
 		// ☢️ Dangerous settings
 		{
-			Name:        "DANGEROUS: Allow all CORs requests",
-			Description: "For security reasons, CORs requests are blocked. If external requests are required, setting this to true will set all cors headers as '*'. This should never be used in production.",
+			Name:        "DANGEROUS: Allow all CORS requests",
+			Description: "For security reasons, CORS requests are blocked except between workspace apps owned by the same user. If external requests are required, setting this to true will set all cors headers as '*'. This should never be used in production.",
 			Flag:        "dangerous-allow-cors-requests",
 			Env:         "CODER_DANGEROUS_ALLOW_CORS_REQUESTS",
 			Hidden:      true, // Hidden, should only be used by yarn dev server
@@ -1497,6 +1585,26 @@ Write out the current server config as YAML to stdout.`,
 			Default:     "", // empty string means pick best server
 			Hidden:      true,
 		},
+		{
+			Name:        "Proxy Health Check Interval",
+			Description: "The interval in which coderd should be checking the status of workspace proxies.",
+			Flag:        "proxy-health-interval",
+			Env:         "CODER_PROXY_HEALTH_INTERVAL",
+			Default:     (time.Minute).String(),
+			Value:       &c.ProxyHealthStatusInterval,
+			Group:       &deploymentGroupNetworkingHTTP,
+			YAML:        "proxyHealthInterval",
+		},
+		{
+			Name:        "Default Quiet Hours Schedule",
+			Description: "The default daily cron schedule applied to users that haven't set a custom quiet hours schedule themselves. The quiet hours schedule determines when workspaces will be force stopped due to the template's max TTL, and will round the max TTL up to be within the user's quiet hours window (or default). The format is the same as the standard cron format, but the day-of-month, month and day-of-week must be *. Only one hour and minute can be specified (ranges or comma separated values are not supported).",
+			Flag:        "default-quiet-hours-schedule",
+			Env:         "CODER_QUIET_HOURS_DEFAULT_SCHEDULE",
+			Default:     "",
+			Value:       &c.UserQuietHoursSchedule.DefaultSchedule,
+			Group:       &deploymentGroupUserQuietHoursSchedule,
+			YAML:        "defaultQuietHoursSchedule",
+		},
 	}
 	return opts
 }
@@ -1682,8 +1790,32 @@ const (
 	// https://github.com/coder/coder/milestone/19
 	ExperimentWorkspaceActions Experiment = "workspace_actions"
 
-	// New workspace filter
-	ExperimentWorkspaceFilter Experiment = "workspace_filter"
+	// ExperimentTailnetHACoordinator downgrades to the haCoordinator instead
+	// of PGCoord.  Should only be used if we see issues in prod with PGCoord
+	// which is now the default.
+	ExperimentTailnetHACoordinator Experiment = "tailnet_ha_coordinator"
+
+	// ExperimentConvertToOIDC enables users to convert from password to
+	// oidc.
+	ExperimentConvertToOIDC Experiment = "convert-to-oidc"
+
+	// ExperimentSingleTailnet replaces workspace connections inside coderd to
+	// all use a single tailnet, instead of the previous behavior of creating a
+	// single tailnet for each agent.
+	// WARNING: This cannot be enabled when using HA.
+	ExperimentSingleTailnet Experiment = "single_tailnet"
+
+	// ExperimentTemplateRestartRequirement allows template admins to have more
+	// control over when workspaces created on a template are required to
+	// restart, and allows users to ensure these restarts never happen during
+	// their business hours.
+	//
+	// Enables:
+	// - User quiet hours schedule settings
+	// - Template restart requirement settings
+	// - Changes the max_deadline algorithm to use restart requirement and user
+	//   quiet hours instead of max_ttl.
+	ExperimentTemplateRestartRequirement Experiment = "template_restart_requirement"
 
 	// Add new experiments here!
 	// ExperimentExample Experiment = "example"
@@ -1693,9 +1825,7 @@ const (
 // users to opt-in to via --experimental='*'.
 // Experiments that are not ready for consumption by all users should
 // not be included here and will be essentially hidden.
-var ExperimentsAll = Experiments{
-	ExperimentWorkspaceFilter,
-}
+var ExperimentsAll = Experiments{}
 
 // Experiments is a list of experiments that are enabled for the deployment.
 // Multiple experiments may be enabled at the same time.

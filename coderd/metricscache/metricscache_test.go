@@ -349,10 +349,13 @@ func TestCache_BuildTime(t *testing.T) {
 
 			defer cache.Close()
 
-			template, err := db.InsertTemplate(ctx, database.InsertTemplateParams{
-				ID:          uuid.New(),
+			id := uuid.New()
+			err := db.InsertTemplate(ctx, database.InsertTemplateParams{
+				ID:          id,
 				Provisioner: database.ProvisionerTypeEcho,
 			})
+			require.NoError(t, err)
+			template, err := db.GetTemplateByID(ctx, id)
 			require.NoError(t, err)
 
 			templateVersion, err := db.InsertTemplateVersion(ctx, database.InsertTemplateVersionParams{
@@ -435,6 +438,7 @@ func TestCache_DeploymentStats(t *testing.T) {
 	cache := metricscache.New(db, slogtest.Make(t, nil), metricscache.Intervals{
 		DeploymentStats: testutil.IntervalFast,
 	})
+	defer cache.Close()
 
 	_, err := db.InsertWorkspaceAgentStat(context.Background(), database.InsertWorkspaceAgentStatParams{
 		ID:                 uuid.New(),

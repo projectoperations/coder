@@ -58,58 +58,64 @@ func (r *RootCmd) workspaceAgent() *clibase.Cmd {
 			ctx, cancel := context.WithCancel(inv.Context())
 			defer cancel()
 
-			ignorePorts := map[int]string{}
+			var (
+				ignorePorts = map[int]string{}
+				isLinux     = runtime.GOOS == "linux"
 
-			isLinux := runtime.GOOS == "linux"
+				sinks      = []slog.Sink{}
+				logClosers = []func() error{}
+			)
+			defer func() {
+				for _, closer := range logClosers {
+					_ = closer()
+				}
+			}()
+
+			addSinkIfProvided := func(sinkFn func(io.Writer) slog.Sink, loc string) error {
+				switch loc {
+				case "":
+					// Do nothing.
+
+				case "/dev/stderr":
+					sinks = append(sinks, sinkFn(inv.Stderr))
+
+				case "/dev/stdout":
+					sinks = append(sinks, sinkFn(inv.Stdout))
+
+				default:
+					fi, err := os.OpenFile(loc, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+					if err != nil {
+						return xerrors.Errorf("open log file %q: %w", loc, err)
+					}
+					sinks = append(sinks, sinkFn(fi))
+					logClosers = append(logClosers, fi.Close)
+				}
+				return nil
+			}
+
+			if err := addSinkIfProvided(sloghuman.Sink, slogHumanPath); err != nil {
+				return xerrors.Errorf("add human sink: %w", err)
+			}
+			if err := addSinkIfProvided(slogjson.Sink, slogJSONPath); err != nil {
+				return xerrors.Errorf("add json sink: %w", err)
+			}
+			if err := addSinkIfProvided(slogstackdriver.Sink, slogStackdriverPath); err != nil {
+				return xerrors.Errorf("add stackdriver sink: %w", err)
+			}
 
 			// Spawn a reaper so that we don't accumulate a ton
 			// of zombie processes.
 			if reaper.IsInitProcess() && !noReap && isLinux {
-				logWriter := &lumberjack.Logger{
+				logWriter := &lumberjackWriteCloseFixer{w: &lumberjack.Logger{
 					Filename: filepath.Join(logDir, "coder-agent-init.log"),
 					MaxSize:  5, // MB
-				}
+					// Without this, rotated logs will never be deleted.
+					MaxBackups: 1,
+				}}
 				defer logWriter.Close()
 
-				sinks := []slog.Sink{sloghuman.Sink(logWriter)}
-				closers := []func() error{}
-				addSinkIfProvided := func(sinkFn func(io.Writer) slog.Sink, loc string) error {
-					switch loc {
-					case "":
-
-					case "/dev/stdout":
-						sinks = append(sinks, sinkFn(inv.Stdout))
-
-					case "/dev/stderr":
-						sinks = append(sinks, sinkFn(inv.Stderr))
-
-					default:
-						fi, err := os.OpenFile(loc, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-						if err != nil {
-							return xerrors.Errorf("open log file %q: %w", loc, err)
-						}
-						closers = append(closers, fi.Close)
-						sinks = append(sinks, sinkFn(fi))
-					}
-					return nil
-				}
-
-				if err := addSinkIfProvided(sloghuman.Sink, slogHumanPath); err != nil {
-					return xerrors.Errorf("add human sink: %w", err)
-				}
-				if err := addSinkIfProvided(slogjson.Sink, slogJSONPath); err != nil {
-					return xerrors.Errorf("add json sink: %w", err)
-				}
-				if err := addSinkIfProvided(slogstackdriver.Sink, slogStackdriverPath); err != nil {
-					return xerrors.Errorf("add stackdriver sink: %w", err)
-				}
-
+				sinks = append(sinks, sloghuman.Sink(logWriter))
 				logger := slog.Make(sinks...).Leveled(slog.LevelDebug)
-				defer func() {
-					for _, closer := range closers {
-						_ = closer()
-					}
-				}()
 
 				logger.Info(ctx, "spawning reaper process")
 				// Do not start a reaper on the child process. It's important
@@ -120,7 +126,7 @@ func (r *RootCmd) workspaceAgent() *clibase.Cmd {
 					reaper.WithCatchSignals(InterruptSignals...),
 				)
 				if err != nil {
-					logger.Error(ctx, "failed to reap", slog.Error(err))
+					logger.Error(ctx, "agent process reaper unable to fork", slog.Error(err))
 					return xerrors.Errorf("fork reap: %w", err)
 				}
 
@@ -143,24 +149,25 @@ func (r *RootCmd) workspaceAgent() *clibase.Cmd {
 			// reaper.
 			go DumpHandler(ctx)
 
-			ljLogger := &lumberjack.Logger{
+			logWriter := &lumberjackWriteCloseFixer{w: &lumberjack.Logger{
 				Filename: filepath.Join(logDir, "coder-agent.log"),
 				MaxSize:  5, // MB
-			}
-			defer ljLogger.Close()
-			logWriter := &closeWriter{w: ljLogger}
+				// Without this, rotated logs will never be deleted.
+				MaxBackups: 1,
+			}}
 			defer logWriter.Close()
 
-			logger := slog.Make(sloghuman.Sink(inv.Stderr), sloghuman.Sink(logWriter)).Leveled(slog.LevelDebug)
+			sinks = append(sinks, sloghuman.Sink(logWriter))
+			logger := slog.Make(sinks...).Leveled(slog.LevelDebug)
 
 			version := buildinfo.Version()
-			logger.Info(ctx, "starting agent",
+			logger.Info(ctx, "agent is starting now",
 				slog.F("url", r.agentURL),
 				slog.F("auth", auth),
 				slog.F("version", version),
 			)
 			client := agentsdk.New(r.agentURL)
-			client.SDK.Logger = logger
+			client.SDK.SetLogger(logger)
 			// Set a reasonable timeout so requests can't hang forever!
 			// The timeout needs to be reasonably long, because requests
 			// with large payloads can take a bit. e.g. startup scripts
@@ -314,10 +321,11 @@ func (r *RootCmd) workspaceAgent() *clibase.Cmd {
 			Value:       clibase.BoolOf(&noReap),
 		},
 		{
-			Flag:        "ssh-max-timeout",
-			Default:     "0",
+			Flag: "ssh-max-timeout",
+			// tcpip.KeepaliveIdleOption = 72h + 1min (forwardTCPSockOpts() in tailnet/conn.go)
+			Default:     "72h",
 			Env:         "CODER_AGENT_SSH_MAX_TIMEOUT",
-			Description: "Specify the max timeout for a SSH connection.",
+			Description: "Specify the max timeout for a SSH connection, it is advisable to set it to a minimum of 60s, but no more than 72h.",
 			Value:       clibase.DurationOf(&sshMaxTimeout),
 		},
 		{
@@ -393,16 +401,16 @@ func ServeHandler(ctx context.Context, logger slog.Logger, handler http.Handler,
 	}
 }
 
-// closeWriter is a wrapper around an io.WriteCloser that prevents
-// writes after Close. This is necessary because lumberjack will
-// re-open the file on write.
-type closeWriter struct {
+// lumberjackWriteCloseFixer is a wrapper around an io.WriteCloser that
+// prevents writes after Close. This is necessary because lumberjack
+// re-opens the file on Write.
+type lumberjackWriteCloseFixer struct {
 	w      io.WriteCloser
 	mu     sync.Mutex // Protects following.
 	closed bool
 }
 
-func (c *closeWriter) Close() error {
+func (c *lumberjackWriteCloseFixer) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -410,7 +418,7 @@ func (c *closeWriter) Close() error {
 	return c.w.Close()
 }
 
-func (c *closeWriter) Write(p []byte) (int, error) {
+func (c *lumberjackWriteCloseFixer) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

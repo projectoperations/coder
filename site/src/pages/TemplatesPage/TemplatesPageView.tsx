@@ -1,5 +1,4 @@
 import Button from "@mui/material/Button"
-import Link from "@mui/material/Link"
 import { makeStyles } from "@mui/styles"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
@@ -42,6 +41,7 @@ import { colors } from "theme/colors"
 import ArrowForwardOutlined from "@mui/icons-material/ArrowForwardOutlined"
 import { Avatar } from "components/Avatar/Avatar"
 import { ErrorAlert } from "components/Alert/ErrorAlert"
+import { docs } from "utils/docs"
 
 export const Language = {
   developerCount: (activeCount: number): string => {
@@ -65,7 +65,7 @@ const TemplateHelpTooltip: React.FC = () => {
       <HelpTooltipTitle>{Language.templateTooltipTitle}</HelpTooltipTitle>
       <HelpTooltipText>{Language.templateTooltipText}</HelpTooltipText>
       <HelpTooltipLinksGroup>
-        <HelpTooltipLink href="https://coder.com/docs/coder-oss/latest/templates#manage-templates">
+        <HelpTooltipLink href={docs("/templates#manage-templates")}>
           {Language.templateTooltipLink}
         </HelpTooltipLink>
       </HelpTooltipLinksGroup>
@@ -127,7 +127,7 @@ const TemplateRow: FC<{ template: Template }> = ({ template }) => {
             navigate(`/templates/${template.name}/workspace`)
           }}
         >
-          Use template
+          Create Workspace
         </Button>
       </TableCell>
     </TableRow>
@@ -151,7 +151,7 @@ export const TemplatesPageView: FC<
         actions={
           <Maybe condition={permissions.createTemplates}>
             <Button component={RouterLink} to="/starter-templates">
-              Starter templates
+              Starter Templates
             </Button>
             <Button
               startIcon={<AddIcon />}
@@ -159,7 +159,7 @@ export const TemplatesPageView: FC<
               to="new"
               variant="contained"
             >
-              Add template
+              Create Template
             </Button>
           </Maybe>
         }
@@ -172,21 +172,7 @@ export const TemplatesPageView: FC<
         </PageHeaderTitle>
         <Maybe condition={Boolean(templates && templates.length > 0)}>
           <PageHeaderSubtitle>
-            Choose a template to create a new workspace
-            {permissions.createTemplates ? (
-              <>
-                , or{" "}
-                <Link
-                  href="https://coder.com/docs/coder-oss/latest/templates#add-a-template"
-                  target="_blank"
-                >
-                  manage templates
-                </Link>{" "}
-                from the CLI.
-              </>
-            ) : (
-              "."
-            )}
+            Select a template to create a workspace.
           </PageHeaderSubtitle>
         </Maybe>
       </PageHeader>

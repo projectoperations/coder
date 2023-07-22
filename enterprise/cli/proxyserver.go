@@ -25,6 +25,7 @@ import (
 	"github.com/coder/coder/cli"
 	"github.com/coder/coder/cli/clibase"
 	"github.com/coder/coder/cli/cliui"
+	"github.com/coder/coder/coderd"
 	"github.com/coder/coder/coderd/httpapi"
 	"github.com/coder/coder/coderd/httpmw"
 	"github.com/coder/coder/codersdk"
@@ -65,7 +66,7 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 			Flag:        "proxy-session-token",
 			Env:         "CODER_PROXY_SESSION_TOKEN",
 			YAML:        "proxySessionToken",
-			Default:     "",
+			Required:    true,
 			Value:       &proxySessionToken,
 			Group:       &externalProxyOptionGroup,
 			Hidden:      false,
@@ -77,10 +78,15 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 			Flag:        "primary-access-url",
 			Env:         "CODER_PRIMARY_ACCESS_URL",
 			YAML:        "primaryAccessURL",
-			Default:     "",
-			Value:       &primaryAccessURL,
-			Group:       &externalProxyOptionGroup,
-			Hidden:      false,
+			Required:    true,
+			Value: clibase.Validate(&primaryAccessURL, func(value *clibase.URL) error {
+				if !(value.Scheme == "http" || value.Scheme == "https") {
+					return xerrors.Errorf("'--primary-access-url' value must be http or https: url=%s", primaryAccessURL.String())
+				}
+				return nil
+			}),
+			Group:  &externalProxyOptionGroup,
+			Hidden: false,
 		},
 	)
 
@@ -94,10 +100,6 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 			clibase.RequireNArgs(0),
 		),
 		Handler: func(inv *clibase.Invocation) error {
-			if !(primaryAccessURL.Scheme == "http" || primaryAccessURL.Scheme == "https") {
-				return xerrors.Errorf("primary access URL must be http or https: url=%s", primaryAccessURL.String())
-			}
-
 			var closers closers
 			// Main command context for managing cancellation of running
 			// services.
@@ -107,7 +109,7 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 
 			go cli.DumpHandler(ctx)
 
-			cli.PrintLogo(inv)
+			cli.PrintLogo(inv, "Coder Workspace Proxy")
 			logger, logCloser, err := cli.BuildLogger(inv, cfg)
 			if err != nil {
 				return xerrors.Errorf("make logger: %w", err)
@@ -175,20 +177,6 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 			defer httpClient.CloseIdleConnections()
 			closers.Add(httpClient.CloseIdleConnections)
 
-			// Warn the user if the access URL appears to be a loopback address.
-			isLocal, err := cli.IsLocalURL(ctx, cfg.AccessURL.Value())
-			if isLocal || err != nil {
-				reason := "could not be resolved"
-				if isLocal {
-					reason = "isn't externally reachable"
-				}
-				cliui.Warnf(
-					inv.Stderr,
-					"The access URL %s %s, this may cause unexpected problems when creating workspaces. Generate a unique *.try.coder.app URL by not specifying an access URL.\n",
-					cliui.Styles.Field.Render(cfg.AccessURL.String()), reason,
-				)
-			}
-
 			// A newline is added before for visibility in terminal output.
 			cliui.Infof(inv.Stdout, "\nView the Web UI: %s", cfg.AccessURL.String())
 
@@ -233,6 +221,7 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 
 			proxy, err := wsproxy.New(ctx, &wsproxy.Options{
 				Logger:             logger,
+				Experiments:        coderd.ReadExperiments(logger, cfg.Experiments.Value()),
 				HTTPClient:         httpClient,
 				DashboardURL:       primaryAccessURL.Value(),
 				AccessURL:          cfg.AccessURL.Value(),
@@ -297,7 +286,7 @@ func (*RootCmd) proxyServer() *clibase.Cmd {
 			case exitErr = <-errCh:
 			case <-notifyCtx.Done():
 				exitErr = notifyCtx.Err()
-				_, _ = fmt.Fprintln(inv.Stdout, cliui.Styles.Bold.Render(
+				_, _ = fmt.Fprintln(inv.Stdout, cliui.DefaultStyles.Bold.Render(
 					"Interrupt caught, gracefully exiting. Use ctrl+\\ to force quit",
 				))
 			}

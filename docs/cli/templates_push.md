@@ -12,6 +12,15 @@ coder templates push [flags] [template]
 
 ## Options
 
+### --activate
+
+|         |                   |
+| ------- | ----------------- |
+| Type    | <code>bool</code> |
+| Default | <code>true</code> |
+
+Whether the new template will be marked active.
+
 ### --always-prompt
 
 |      |                   |
@@ -19,6 +28,15 @@ coder templates push [flags] [template]
 | Type | <code>bool</code> |
 
 Always prompt all parameters. Does not pull parameter values from active template version.
+
+### --create
+
+|         |                    |
+| ------- | ------------------ |
+| Type    | <code>bool</code>  |
+| Default | <code>false</code> |
+
+Create the template if it does not exist.
 
 ### -d, --directory
 
@@ -28,6 +46,23 @@ Always prompt all parameters. Does not pull parameter values from active templat
 | Default | <code>.</code>      |
 
 Specify the directory to create from, use '-' to read tar from stdin.
+
+### --ignore-lockfile
+
+|         |                    |
+| ------- | ------------------ |
+| Type    | <code>bool</code>  |
+| Default | <code>false</code> |
+
+Ignore warnings about not having a .terraform.lock.hcl file present in the template.
+
+### -m, --message
+
+|      |                     |
+| ---- | ------------------- |
+| Type | <code>string</code> |
+
+Specify a message describing the changes in this version of the template. Messages longer than 72 characters will be displayed as truncated.
 
 ### --name
 

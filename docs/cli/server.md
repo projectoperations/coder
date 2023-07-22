@@ -30,6 +30,16 @@ coder server [flags]
 
 The URL that users will use to access the Coder deployment.
 
+### --block-direct-connections
+
+|             |                                          |
+| ----------- | ---------------------------------------- |
+| Type        | <code>bool</code>                        |
+| Environment | <code>$CODER_BLOCK_DIRECT</code>         |
+| YAML        | <code>networking.derp.blockDirect</code> |
+
+Block peer-to-peer (aka. direct) workspace connections. All workspace connections from the CLI will be proxied through Coder (or custom configured DERP servers) and will never be peer-to-peer when enabled. Workspaces may still reach out to STUN servers to get their address until they are restarted after this change has been made, but new connections will still be proxied regardless.
+
 ### --browser-only
 
 |             |                                     |
@@ -173,6 +183,16 @@ An HTTP URL that is accessible by other replicas to relay DERP traffic. Required
 
 Addresses for STUN servers to establish P2P connections. Use special value 'disable' to turn off STUN.
 
+### --default-quiet-hours-schedule
+
+|             |                                                               |
+| ----------- | ------------------------------------------------------------- |
+| Type        | <code>string</code>                                           |
+| Environment | <code>$CODER_QUIET_HOURS_DEFAULT_SCHEDULE</code>              |
+| YAML        | <code>userQuietHoursSchedule.defaultQuietHoursSchedule</code> |
+
+The default daily cron schedule applied to users that haven't set a custom quiet hours schedule themselves. The quiet hours schedule determines when workspaces will be force stopped due to the template's max TTL, and will round the max TTL up to be within the user's quiet hours window (or default). The format is the same as the standard cron format, but the day-of-month, month and day-of-week must be \*. Only one hour and minute can be specified (ranges or comma separated values are not supported).
+
 ### --disable-owner-workspace-access
 
 |             |                                                    |
@@ -212,6 +232,27 @@ Disable workspace apps that are not served from subdomains. Path-based apps can 
 | YAML        | <code>networking.http.disableSessionExpiryRefresh</code> |
 
 Disable automatic session expiry bumping due to activity. This forces all sessions to become invalid after the session expiry duration has been reached.
+
+### --docs-url
+
+|             |                                 |
+| ----------- | ------------------------------- |
+| Type        | <code>url</code>                |
+| Environment | <code>$CODER_DOCS_URL</code>    |
+| YAML        | <code>networking.docsURL</code> |
+
+Specifies the custom docs URL.
+
+### --enable-terraform-debug-mode
+
+|             |                                                             |
+| ----------- | ----------------------------------------------------------- |
+| Type        | <code>bool</code>                                           |
+| Environment | <code>$CODER_ENABLE_TERRAFORM_DEBUG_MODE</code>             |
+| YAML        | <code>introspection.logging.enableTerraformDebugMode</code> |
+| Default     | <code>false</code>                                          |
+
+Allow administrators to enable Terraform debug output.
 
 ### --swagger-enable
 
@@ -426,7 +467,7 @@ OIDC claim field to use as the email.
 | Environment | <code>$CODER_OIDC_GROUP_FIELD</code> |
 | YAML        | <code>oidc.groupField</code>         |
 
-Change the OIDC default 'groups' claim field. By default, will be 'groups' if present in the oidc scopes argument.
+This field must be set if using the group sync feature and the scope name is not 'groups'. Set to the claim to be used for groups.
 
 ### --oidc-group-mapping
 
@@ -565,6 +606,17 @@ The bind address to serve prometheus metrics.
 
 Collect agent stats (may increase charges for metrics storage).
 
+### --prometheus-collect-db-metrics
+
+|             |                                                          |
+| ----------- | -------------------------------------------------------- |
+| Type        | <code>bool</code>                                        |
+| Environment | <code>$CODER_PROMETHEUS_COLLECT_DB_METRICS</code>        |
+| YAML        | <code>introspection.prometheus.collect_db_metrics</code> |
+| Default     | <code>false</code>                                       |
+
+Collect database metrics (may increase charges for metrics storage).
+
 ### --prometheus-enable
 
 |             |                                              |
@@ -585,6 +637,17 @@ Serve prometheus metrics on the address defined by prometheus address.
 | Default     | <code>3</code>                          |
 
 Number of provisioner daemons to create on start. If builds are stuck in queued state for a long time, consider increasing this.
+
+### --proxy-health-interval
+
+|             |                                                  |
+| ----------- | ------------------------------------------------ |
+| Type        | <code>duration</code>                            |
+| Environment | <code>$CODER_PROXY_HEALTH_INTERVAL</code>        |
+| YAML        | <code>networking.http.proxyHealthInterval</code> |
+| Default     | <code>1m0s</code>                                |
+
+The interval in which coderd should be checking the status of workspace proxies.
 
 ### --proxy-trusted-headers
 

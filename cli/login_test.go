@@ -142,7 +142,7 @@ func TestLogin(t *testing.T) {
 
 		// Validate that we reprompt for matching passwords.
 		pty.ExpectMatch("Passwords do not match")
-		pty.ExpectMatch("Enter a " + cliui.Styles.Field.Render("password"))
+		pty.ExpectMatch("Enter a " + cliui.DefaultStyles.Field.Render("password"))
 
 		pty.WriteLine("SomeSecurePassword!")
 		pty.ExpectMatch("Confirm")
@@ -197,6 +197,7 @@ func TestLogin(t *testing.T) {
 		<-doneChan
 	})
 
+	// TokenFlag should generate a new session token and store it in the session file.
 	t.Run("TokenFlag", func(t *testing.T) {
 		t.Parallel()
 		client := coderdtest.New(t, nil)
@@ -206,6 +207,7 @@ func TestLogin(t *testing.T) {
 		require.NoError(t, err)
 		sessionFile, err := cfg.Session().Read()
 		require.NoError(t, err)
-		require.Equal(t, client.SessionToken(), sessionFile)
+		// This **should not be equal** to the token we passed in.
+		require.NotEqual(t, client.SessionToken(), sessionFile)
 	})
 }

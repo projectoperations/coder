@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,7 +51,7 @@ func setupWorkspaceForAgent(t *testing.T, mutate func([]*proto.Agent) []*proto.A
 		}
 	}
 	client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
-	client.Logger = slogtest.Make(t, nil).Named("client").Leveled(slog.LevelDebug)
+	client.SetLogger(slogtest.Make(t, nil).Named("client").Leveled(slog.LevelDebug))
 	user := coderdtest.CreateFirstUser(t, client)
 	agentToken := uuid.NewString()
 	version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, &echo.Responses{
@@ -261,7 +263,7 @@ func TestSSH(t *testing.T) {
 		client, workspace, agentToken := setupWorkspaceForAgent(t, nil)
 		_, _ = tGoContext(t, func(ctx context.Context) {
 			// Run this async so the SSH command has to wait for
-			// the build and agent to connect!
+			// the build and agent to connect.
 			agentClient := agentsdk.New(client.URL)
 			agentClient.SetSessionToken(agentToken)
 			agentCloser := agent.New(agent.Options{
@@ -408,23 +410,69 @@ func TestSSH(t *testing.T) {
 		<-cmdDone
 	})
 
-	t.Run("FileLogging", func(t *testing.T) {
+	t.Run("RemoteForward", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Test not supported on windows")
+		}
+
 		t.Parallel()
 
-		dir := t.TempDir()
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("hello world"))
+		}))
+		defer httpServer.Close()
 
 		client, workspace, agentToken := setupWorkspaceForAgent(t, nil)
-		inv, root := clitest.New(t, "ssh", workspace.Name, "-l", "--log-dir", dir)
-		clitest.SetupConfig(t, client, root)
-		pty := ptytest.New(t).Attach(inv)
+
+		agentClient := agentsdk.New(client.URL)
+		agentClient.SetSessionToken(agentToken)
+		agentCloser := agent.New(agent.Options{
+			Client: agentClient,
+			Logger: slogtest.Make(t, nil).Named("agent"),
+		})
+		defer agentCloser.Close()
 
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
+		inv, root := clitest.New(t,
+			"ssh",
+			workspace.Name,
+			"--remote-forward",
+			"8222:"+httpServer.Listener.Addr().String(),
+		)
+		clitest.SetupConfig(t, client, root)
+		pty := ptytest.New(t).Attach(inv)
+		inv.Stderr = pty.Output()
 		cmdDone := tGo(t, func() {
 			err := inv.WithContext(ctx).Run()
-			assert.NoError(t, err)
+			assert.NoError(t, err, "ssh command failed")
 		})
+
+		// Wait for the prompt or any output really to indicate the command has
+		// started and accepting input on stdin.
+		_ = pty.Peek(ctx, 1)
+
+		// Download the test page
+		pty.WriteLine("curl localhost:8222")
+		pty.ExpectMatch("hello world")
+
+		// And we're done.
+		pty.WriteLine("exit")
+		<-cmdDone
+	})
+
+	t.Run("FileLogging", func(t *testing.T) {
+		t.Parallel()
+
+		logDir := t.TempDir()
+
+		client, workspace, agentToken := setupWorkspaceForAgent(t, nil)
+		inv, root := clitest.New(t, "ssh", "-l", logDir, workspace.Name)
+		clitest.SetupConfig(t, client, root)
+		pty := ptytest.New(t).Attach(inv)
+		w := clitest.StartWithWaiter(t, inv)
+
 		pty.ExpectMatch("Waiting")
 
 		agentClient := agentsdk.New(client.URL)
@@ -439,17 +487,11 @@ func TestSSH(t *testing.T) {
 
 		// Shells on Mac, Windows, and Linux all exit shells with the "exit" command.
 		pty.WriteLine("exit")
-		<-cmdDone
+		w.RequireSuccess()
 
-		entries, err := os.ReadDir(dir)
+		ents, err := os.ReadDir(logDir)
 		require.NoError(t, err)
-		for _, e := range entries {
-			t.Logf("logdir entry: %s", e.Name())
-			if strings.HasPrefix(e.Name(), "coder-ssh") {
-				return
-			}
-		}
-		t.Fatal("failed to find ssh logfile")
+		require.Len(t, ents, 1, "expected one file in logdir %s", logDir)
 	})
 }
 

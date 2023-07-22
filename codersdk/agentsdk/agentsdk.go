@@ -13,17 +13,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
+	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 	"nhooyr.io/websocket"
 	"tailscale.com/tailcfg"
 
-	"github.com/coder/retry"
-
 	"cdr.dev/slog"
-
-	"github.com/google/uuid"
-
 	"github.com/coder/coder/codersdk"
+	"github.com/coder/retry"
 )
 
 // New returns a client that is used to interact with the
@@ -84,21 +81,23 @@ func (c *Client) PostMetadata(ctx context.Context, key string, req PostMetadataR
 }
 
 type Manifest struct {
+	AgentID uuid.UUID `json:"agent_id"`
 	// GitAuthConfigs stores the number of Git configurations
 	// the Coder deployment has. If this number is >0, we
 	// set up special configuration in the workspace.
-	GitAuthConfigs        int                                          `json:"git_auth_configs"`
-	VSCodePortProxyURI    string                                       `json:"vscode_port_proxy_uri"`
-	Apps                  []codersdk.WorkspaceApp                      `json:"apps"`
-	DERPMap               *tailcfg.DERPMap                             `json:"derpmap"`
-	EnvironmentVariables  map[string]string                            `json:"environment_variables"`
-	StartupScript         string                                       `json:"startup_script"`
-	StartupScriptTimeout  time.Duration                                `json:"startup_script_timeout"`
-	Directory             string                                       `json:"directory"`
-	MOTDFile              string                                       `json:"motd_file"`
-	ShutdownScript        string                                       `json:"shutdown_script"`
-	ShutdownScriptTimeout time.Duration                                `json:"shutdown_script_timeout"`
-	Metadata              []codersdk.WorkspaceAgentMetadataDescription `json:"metadata"`
+	GitAuthConfigs           int                                          `json:"git_auth_configs"`
+	VSCodePortProxyURI       string                                       `json:"vscode_port_proxy_uri"`
+	Apps                     []codersdk.WorkspaceApp                      `json:"apps"`
+	DERPMap                  *tailcfg.DERPMap                             `json:"derpmap"`
+	EnvironmentVariables     map[string]string                            `json:"environment_variables"`
+	StartupScript            string                                       `json:"startup_script"`
+	StartupScriptTimeout     time.Duration                                `json:"startup_script_timeout"`
+	Directory                string                                       `json:"directory"`
+	MOTDFile                 string                                       `json:"motd_file"`
+	ShutdownScript           string                                       `json:"shutdown_script"`
+	ShutdownScriptTimeout    time.Duration                                `json:"shutdown_script_timeout"`
+	DisableDirectConnections bool                                         `json:"disable_direct_connections"`
+	Metadata                 []codersdk.WorkspaceAgentMetadataDescription `json:"metadata"`
 }
 
 // Manifest fetches manifest for the currently authenticated workspace agent.
@@ -193,7 +192,7 @@ func (c *Client) Listen(ctx context.Context) (net.Conn, error) {
 		ticker := time.NewTicker(tick)
 		defer ticker.Stop()
 		defer func() {
-			c.SDK.Logger.Debug(ctx, "coordinate pinger exited")
+			c.SDK.Logger().Debug(ctx, "coordinate pinger exited")
 		}()
 		for {
 			select {
@@ -204,18 +203,18 @@ func (c *Client) Listen(ctx context.Context) (net.Conn, error) {
 
 				err := conn.Ping(ctx)
 				if err != nil {
-					c.SDK.Logger.Error(ctx, "workspace agent coordinate ping", slog.Error(err))
+					c.SDK.Logger().Error(ctx, "workspace agent coordinate ping", slog.Error(err))
 
 					err := conn.Close(websocket.StatusGoingAway, "Ping failed")
 					if err != nil {
-						c.SDK.Logger.Error(ctx, "close workspace agent coordinate websocket", slog.Error(err))
+						c.SDK.Logger().Error(ctx, "close workspace agent coordinate websocket", slog.Error(err))
 					}
 
 					cancel()
 					return
 				}
 
-				c.SDK.Logger.Debug(ctx, "got coordinate pong", slog.F("took", time.Since(start)))
+				c.SDK.Logger().Debug(ctx, "got coordinate pong", slog.F("took", time.Since(start)))
 				cancel()
 			}
 		}
@@ -533,7 +532,8 @@ func (c *Client) PostStats(ctx context.Context, stats *Stats) (StatsResponse, er
 }
 
 type PostLifecycleRequest struct {
-	State codersdk.WorkspaceAgentLifecycle `json:"state"`
+	State     codersdk.WorkspaceAgentLifecycle `json:"state"`
+	ChangedAt time.Time                        `json:"changed_at"`
 }
 
 func (c *Client) PostLifecycle(ctx context.Context, req PostLifecycleRequest) error {
@@ -589,6 +589,24 @@ func (c *Client) PatchStartupLogs(ctx context.Context, req PatchStartupLogs) err
 		return codersdk.ReadBodyAsError(res)
 	}
 	return nil
+}
+
+// GetServiceBanner relays the service banner config.
+func (c *Client) GetServiceBanner(ctx context.Context) (codersdk.ServiceBannerConfig, error) {
+	res, err := c.SDK.Request(ctx, http.MethodGet, "/api/v2/appearance", nil)
+	if err != nil {
+		return codersdk.ServiceBannerConfig{}, err
+	}
+	defer res.Body.Close()
+	// If the route does not exist then Enterprise code is not enabled.
+	if res.StatusCode == http.StatusNotFound {
+		return codersdk.ServiceBannerConfig{}, nil
+	}
+	if res.StatusCode != http.StatusOK {
+		return codersdk.ServiceBannerConfig{}, codersdk.ReadBodyAsError(res)
+	}
+	var cfg codersdk.AppearanceConfig
+	return cfg.ServiceBanner, json.NewDecoder(res.Body).Decode(&cfg)
 }
 
 type GitAuthResponse struct {
@@ -673,7 +691,6 @@ func StartupLogsNotifyChannel(agentID uuid.UUID) string {
 
 type StartupLogsNotifyMessage struct {
 	CreatedAfter int64 `json:"created_after"`
-	EndOfLogs    bool  `json:"end_of_logs"`
 }
 
 type closeNetConn struct {

@@ -27,6 +27,7 @@ site/storybook-static/
 site/test-results/*
 site/e2e/test-results/*
 site/e2e/states/*.json
+site/e2e/.auth.json
 site/playwright-report/*
 site/.swc
 site/dist/
@@ -58,5 +59,5 @@ site/stats/
 # Loadtesting
 ./scaletest/terraform/.terraform
 ./scaletest/terraform/.terraform.lock.hcl
-terraform.tfstate.*
-**/*.tfvars
+scaletest/terraform/secrets.tfvars
+.terraform.tfstate.*

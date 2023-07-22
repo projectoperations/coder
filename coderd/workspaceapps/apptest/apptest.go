@@ -349,6 +349,51 @@ func Run(t *testing.T, appHostIsPrimary bool, factory DeploymentFactory) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 		})
 
+		t.Run("ProxiesHTTPS", func(t *testing.T) {
+			t.Parallel()
+
+			appDetails := setupProxyTest(t, &DeploymentOptions{
+				ServeHTTPS: true,
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+			defer cancel()
+
+			u := appDetails.PathAppURL(appDetails.Apps.Owner)
+			resp, err := requestWithRetries(ctx, t, appDetails.AppClient(t), http.MethodGet, u.String(), nil)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, proxyTestAppBody, string(body))
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var appTokenCookie *http.Cookie
+			for _, c := range resp.Cookies() {
+				if c.Name == codersdk.DevURLSignedAppTokenCookie {
+					appTokenCookie = c
+					break
+				}
+			}
+			require.NotNil(t, appTokenCookie, "no signed app token cookie in response")
+			require.Equal(t, appTokenCookie.Path, u.Path, "incorrect path on app token cookie")
+
+			// Ensure the signed app token cookie is valid.
+			appTokenClient := appDetails.AppClient(t)
+			appTokenClient.SetSessionToken("")
+			appTokenClient.HTTPClient.Jar, err = cookiejar.New(nil)
+			require.NoError(t, err)
+			appTokenClient.HTTPClient.Jar.SetCookies(u, []*http.Cookie{appTokenCookie})
+
+			resp, err = requestWithRetries(ctx, t, appTokenClient, http.MethodGet, u.String(), nil)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err = io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, proxyTestAppBody, string(body))
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+
 		t.Run("BlocksMe", func(t *testing.T) {
 			t.Parallel()
 
@@ -762,6 +807,50 @@ func Run(t *testing.T, appHostIsPrimary bool, factory DeploymentFactory) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 		})
 
+		t.Run("ProxiesHTTPS", func(t *testing.T) {
+			t.Parallel()
+
+			appDetails := setupProxyTest(t, &DeploymentOptions{
+				ServeHTTPS: true,
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+			defer cancel()
+
+			u := appDetails.SubdomainAppURL(appDetails.Apps.Owner)
+			resp, err := requestWithRetries(ctx, t, appDetails.AppClient(t), http.MethodGet, u.String(), nil)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, proxyTestAppBody, string(body))
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var appTokenCookie *http.Cookie
+			for _, c := range resp.Cookies() {
+				if c.Name == codersdk.DevURLSignedAppTokenCookie {
+					appTokenCookie = c
+					break
+				}
+			}
+			require.NotNil(t, appTokenCookie, "no signed token cookie in response")
+			require.Equal(t, appTokenCookie.Path, "/", "incorrect path on signed token cookie")
+
+			// Ensure the signed app token cookie is valid.
+			appTokenClient := appDetails.AppClient(t)
+			appTokenClient.SetSessionToken("")
+			appTokenClient.HTTPClient.Jar, err = cookiejar.New(nil)
+			require.NoError(t, err)
+			appTokenClient.HTTPClient.Jar.SetCookies(u, []*http.Cookie{appTokenCookie})
+
+			resp, err = requestWithRetries(ctx, t, appTokenClient, http.MethodGet, u.String(), nil)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err = io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, proxyTestAppBody, string(body))
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+
 		t.Run("ProxiesPort", func(t *testing.T) {
 			t.Parallel()
 
@@ -928,8 +1017,8 @@ func Run(t *testing.T, appHostIsPrimary bool, factory DeploymentFactory) {
 			forceURLTransport(t, client)
 
 			// Create workspace.
-			port := appServer(t)
-			workspace, _ = createWorkspaceWithApps(t, client, user.OrganizationIDs[0], user, port)
+			port := appServer(t, nil, false)
+			workspace, _ = createWorkspaceWithApps(t, client, user.OrganizationIDs[0], user, port, false)
 
 			// Verify that the apps have the correct sharing levels set.
 			workspaceBuild, err := client.WorkspaceBuild(ctx, workspace.LatestBuild.ID)
@@ -1259,5 +1348,62 @@ func Run(t *testing.T, appHostIsPrimary bool, factory DeploymentFactory) {
 				require.Equal(t, secWebSocketKey, resp.Header.Get("Sec-WebSocket-Key"))
 			})
 		}
+	})
+
+	t.Run("CORSHeadersStripped", func(t *testing.T) {
+		t.Parallel()
+
+		appDetails := setupProxyTest(t, &DeploymentOptions{
+			headers: http.Header{
+				"X-Foobar":                         []string{"baz"},
+				"Access-Control-Allow-Origin":      []string{"http://localhost"},
+				"access-control-allow-origin":      []string{"http://localhost"},
+				"Access-Control-Allow-Credentials": []string{"true"},
+				"Access-Control-Allow-Methods":     []string{"PUT"},
+				"Access-Control-Allow-Headers":     []string{"X-Foobar"},
+				"Vary": []string{
+					"Origin",
+					"origin",
+					"Access-Control-Request-Headers",
+					"access-Control-request-Headers",
+					"Access-Control-Request-Methods",
+					"ACCESS-CONTROL-REQUEST-METHODS",
+					"X-Foobar",
+				},
+			},
+		})
+
+		appURL := appDetails.SubdomainAppURL(appDetails.Apps.Owner)
+
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+		defer cancel()
+
+		resp, err := requestWithRetries(ctx, t, appDetails.AppClient(t), http.MethodGet, appURL.String(), nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, []string(nil), resp.Header.Values("Access-Control-Allow-Origin"))
+		require.Equal(t, []string(nil), resp.Header.Values("Access-Control-Allow-Credentials"))
+		require.Equal(t, []string(nil), resp.Header.Values("Access-Control-Allow-Methods"))
+		require.Equal(t, []string(nil), resp.Header.Values("Access-Control-Allow-Headers"))
+		// Somehow there are two "Origin"s in Vary even though there should only be
+		// one (from the CORS middleware), even if you remove the headers being sent
+		// above.  When I do nothing else but change the expected value below to
+		// have two "Origin"s suddenly Vary only has one.  It is somehow always the
+		// opposite of whatever I put for the expected.  So, reluctantly, remove
+		// duplicate "Origin" values.
+		var deduped []string
+		var addedOrigin bool
+		for _, value := range resp.Header.Values("Vary") {
+			if value != "Origin" || !addedOrigin {
+				if value == "Origin" {
+					addedOrigin = true
+				}
+				deduped = append(deduped, value)
+			}
+		}
+		require.Equal(t, []string{"Origin", "X-Foobar"}, deduped)
+		require.Equal(t, []string{"baz"}, resp.Header.Values("X-Foobar"))
 	})
 }

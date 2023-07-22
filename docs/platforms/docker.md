@@ -54,7 +54,7 @@ Coder with Docker has the following advantages:
 
    <img src="../images/platforms/docker/login.png">
 
-   Then navigate to `Templates > docker > Create workspace`
+   Then navigate to `Templates > docker > Create Workspace`
 
    <img src="../images/platforms/docker/create-workspace.png">
 
@@ -70,11 +70,18 @@ Coder with Docker has the following advantages:
 1. If you want to modify the Docker image or template, edit the files in the
    previously created `./docker` directory, then run `coder templates push`.
 
+## Using remote Docker host
+
+You can use a remote Docker host in 2 ways.
+
+1. Over SSH. See [here](https://registry.terraform.io/providers/kreuzwerker/docker/latest/docs#remote-hosts) for details.
+2. Over TCP. See [here](https://registry.terraform.io/providers/kreuzwerker/docker/latest/docs#certificate-information) for details.
+
 ## Troubleshooting
 
 ### Docker-based workspace is stuck in "Connecting..."
 
-Ensure you have an externally-reachable `CODER_ACCESS_URL` set. See [troubleshooting templates](../templates/README.md#Troubleshooting) for more steps.
+Ensure you have an externally-reachable `CODER_ACCESS_URL` set. See [troubleshooting templates](../templates/index.md#Troubleshooting) for more steps.
 
 ### Permission denied while trying to connect to the Docker daemon socket
 
@@ -83,5 +90,5 @@ See Docker's official documentation to [Manage Docker as a non-root user](https:
 ## Next Steps
 
 - [Port-forward](../networking/port-forwarding.md)
-- [Learn more about template configuration](../templates/README.md)
+- [Learn more about template configuration](../templates/index.md)
 - [Configure more IDEs](../ides/web-ides.md)

@@ -216,18 +216,20 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 		ssh string
 	}
 	type wantConfig struct {
-		ssh string
+		ssh        string
+		regexMatch string
 	}
 	type match struct {
 		match, write string
 	}
 	tests := []struct {
-		name        string
-		args        []string
-		matches     []match
-		writeConfig writeConfig
-		wantConfig  wantConfig
-		wantErr     bool
+		name         string
+		args         []string
+		matches      []match
+		writeConfig  writeConfig
+		wantConfig   wantConfig
+		wantErr      bool
+		echoResponse *echo.Responses
 	}{
 		{
 			name: "Config file is created",
@@ -482,11 +484,31 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 			args: []string{"--yes"},
 		},
 		{
+			name: "Serialize supported flags",
+			wantConfig: wantConfig{
+				ssh: strings.Join([]string{
+					headerStart,
+					"# Last config-ssh options:",
+					"# :wait=yes",
+					"# :ssh-host-prefix=coder-test.",
+					"#",
+					headerEnd,
+					"",
+				}, "\n"),
+			},
+			args: []string{
+				"--yes",
+				"--wait=yes",
+				"--ssh-host-prefix", "coder-test.",
+			},
+		},
+		{
 			name: "Do not prompt for new options when prev opts flag is set",
 			writeConfig: writeConfig{
 				ssh: strings.Join([]string{
 					headerStart,
 					"# Last config-ssh options:",
+					"# :wait=no",
 					"# :ssh-option=ForwardAgent=yes",
 					"#",
 					headerEnd,
@@ -497,6 +519,7 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 				ssh: strings.Join([]string{
 					headerStart,
 					"# Last config-ssh options:",
+					"# :wait=no",
 					"# :ssh-option=ForwardAgent=yes",
 					"#",
 					headerEnd,
@@ -558,6 +581,20 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "Custom CLI Path",
+			args: []string{
+				"-y", "--coder-binary-path", "/foo/bar/coder",
+			},
+			wantErr: false,
+			echoResponse: &echo.Responses{
+				Parse:          echo.ParseComplete,
+				ProvisionApply: echo.ProvisionApplyWithAgent(""),
+			},
+			wantConfig: wantConfig{
+				regexMatch: "ProxyCommand /foo/bar/coder",
+			},
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -567,7 +604,7 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 			var (
 				client    = coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 				user      = coderdtest.CreateFirstUser(t, client)
-				version   = coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+				version   = coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, tt.echoResponse)
 				_         = coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
 				project   = coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 				workspace = coderdtest.CreateWorkspace(t, client, user.OrganizationID, project.ID)
@@ -589,8 +626,7 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 			clitest.SetupConfig(t, client, root)
 
 			pty := ptytest.New(t)
-			inv.Stdin = pty.Input()
-			inv.Stdout = pty.Output()
+			pty.Attach(inv)
 			done := tGo(t, func() {
 				err := inv.Run()
 				if !tt.wantErr {
@@ -607,9 +643,14 @@ func TestConfigSSH_FileWriteAndOptionsFlow(t *testing.T) {
 
 			<-done
 
-			if tt.wantConfig.ssh != "" {
+			if tt.wantConfig.ssh != "" || tt.wantConfig.regexMatch != "" {
 				got := sshConfigFileRead(t, sshConfigName)
-				assert.Equal(t, tt.wantConfig.ssh, got)
+				if tt.wantConfig.ssh != "" {
+					assert.Equal(t, tt.wantConfig.ssh, got)
+				}
+				if tt.wantConfig.regexMatch != "" {
+					assert.Regexp(t, tt.wantConfig.regexMatch, got, "regex match")
+				}
 			}
 		})
 	}

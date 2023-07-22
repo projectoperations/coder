@@ -39,6 +39,15 @@ Specify the directory to create from, use '-' to read tar from stdin.
 
 Specify a failure TTL for workspaces created from this template. This licensed feature's default is 0h (off).
 
+### --ignore-lockfile
+
+|         |                    |
+| ------- | ------------------ |
+| Type    | <code>bool</code>  |
+| Default | <code>false</code> |
+
+Ignore warnings about not having a .terraform.lock.hcl file present in the template.
+
 ### --inactivity-ttl
 
 |         |                       |
@@ -47,6 +56,22 @@ Specify a failure TTL for workspaces created from this template. This licensed f
 | Default | <code>0h</code>       |
 
 Specify an inactivity TTL for workspaces created from this template. This licensed feature's default is 0h (off).
+
+### -m, --message
+
+|      |                     |
+| ---- | ------------------- |
+| Type | <code>string</code> |
+
+Specify a message describing the changes in this version of the template. Messages longer than 72 characters will be displayed as truncated.
+
+### --private
+
+|      |                   |
+| ---- | ----------------- |
+| Type | <code>bool</code> |
+
+Disable the default behavior of granting template access to the 'everyone' group. The template permissions must be updated to allow non-admin users to use this template.
 
 ### --provisioner-tag
 

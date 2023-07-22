@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"golang.org/x/xerrors"
+
+	"github.com/coder/coder/coderd/util/xio"
 )
 
 const (
@@ -32,10 +34,15 @@ func dirHasExt(dir string, exts ...string) (bool, error) {
 	return false, nil
 }
 
+func DirHasLockfile(dir string) (bool, error) {
+	return dirHasExt(dir, ".terraform.lock.hcl")
+}
+
 // Tar archives a Terraform directory.
 func Tar(w io.Writer, directory string, limit int64) error {
+	// The total bytes written must be under the limit, so use -1
+	w = xio.NewLimitWriter(w, limit-1)
 	tarWriter := tar.NewWriter(w)
-	totalSize := int64(0)
 
 	tfExts := []string{".tf", ".tf.json"}
 	hasTf, err := dirHasExt(directory, tfExts...)
@@ -97,22 +104,26 @@ func Tar(w io.Writer, directory string, limit int64) error {
 		if !fileInfo.Mode().IsRegular() {
 			return nil
 		}
+
 		data, err := os.Open(file)
 		if err != nil {
 			return err
 		}
 		defer data.Close()
-		wrote, err := io.Copy(tarWriter, data)
+		_, err = io.Copy(tarWriter, data)
 		if err != nil {
+			if xerrors.Is(err, xio.ErrLimitReached) {
+				return xerrors.Errorf("Archive too big. Must be <= %d bytes", limit)
+			}
 			return err
 		}
-		totalSize += wrote
-		if limit != 0 && totalSize >= limit {
-			return xerrors.Errorf("Archive too big. Must be <= %d bytes", limit)
-		}
+
 		return data.Close()
 	})
 	if err != nil {
+		if xerrors.Is(err, xio.ErrLimitReached) {
+			return xerrors.Errorf("Archive too big. Must be <= %d bytes", limit)
+		}
 		return err
 	}
 	err = tarWriter.Flush()

@@ -39,51 +39,38 @@ func (api *API) forceWorkspaceProxyHealthUpdate(ctx context.Context) {
 // NOTE: this doesn't need a swagger definition since AGPL already has one, and
 // this route overrides the AGPL one.
 func (api *API) regions(rw http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	//nolint:gocritic // this route intentionally requests resources that users
+	regions, err := api.fetchRegions(r.Context())
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+
+	httpapi.Write(r.Context(), rw, http.StatusOK, regions)
+}
+
+func (api *API) fetchRegions(ctx context.Context) (codersdk.RegionsResponse[codersdk.Region], error) {
+	//nolint:gocritic // this intentionally requests resources that users
 	// cannot usually access in order to give them a full list of available
-	// regions.
+	// regions. Regions are just a data subset of proxies.
 	ctx = dbauthz.AsSystemRestricted(ctx)
-
-	primaryRegion, err := api.AGPL.PrimaryRegion(ctx)
+	proxies, err := api.fetchWorkspaceProxies(ctx)
 	if err != nil {
-		httpapi.InternalServerError(rw, err)
-		return
-	}
-	regions := []codersdk.Region{primaryRegion}
-
-	proxies, err := api.Database.GetWorkspaceProxies(ctx)
-	if err != nil {
-		httpapi.InternalServerError(rw, err)
-		return
+		return codersdk.RegionsResponse[codersdk.Region]{}, err
 	}
 
-	// Only add additional regions if the proxy health is enabled.
-	// If it is nil, it is because the moons feature flag is not on.
-	// By default, we still want to return the primary region.
-	if api.ProxyHealth != nil {
-		proxyHealth := api.ProxyHealth.HealthStatus()
-		for _, proxy := range proxies {
-			if proxy.Deleted {
-				continue
-			}
-
-			health := proxyHealth[proxy.ID]
-			regions = append(regions, codersdk.Region{
-				ID:               proxy.ID,
-				Name:             proxy.Name,
-				DisplayName:      proxy.DisplayName,
-				IconURL:          proxy.Icon,
-				Healthy:          health.Status == proxyhealth.Healthy,
-				PathAppURL:       proxy.Url,
-				WildcardHostname: proxy.WildcardHostname,
-			})
+	regions := make([]codersdk.Region, 0, len(proxies.Regions))
+	for i := range proxies.Regions {
+		// Ignore deleted proxies.
+		if proxies.Regions[i].Deleted {
+			continue
 		}
+		// Append the inner region data.
+		regions = append(regions, proxies.Regions[i].Region)
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, codersdk.RegionsResponse{
+	return codersdk.RegionsResponse[codersdk.Region]{
 		Regions: regions,
-	})
+	}, nil
 }
 
 // @Summary Update workspace proxy
@@ -127,21 +114,37 @@ func (api *API) patchWorkspaceProxy(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedProxy, err := api.Database.UpdateWorkspaceProxy(ctx, database.UpdateWorkspaceProxyParams{
-		Name:        req.Name,
-		DisplayName: req.DisplayName,
-		Icon:        req.Icon,
-		ID:          proxy.ID,
-		// If hashedSecret is nil or empty, this will not update the secret.
-		TokenHashedSecret: hashedSecret,
-	})
-	if httpapi.Is404Error(err) {
-		httpapi.ResourceNotFound(rw)
-		return
-	}
+	deploymentIDStr, err := api.Database.GetDeploymentID(ctx)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
+	}
+
+	var updatedProxy database.WorkspaceProxy
+	if proxy.ID.String() == deploymentIDStr {
+		// User is editing the default primary proxy.
+		var ok bool
+		updatedProxy, ok = api.patchPrimaryWorkspaceProxy(req, rw, r)
+		if !ok {
+			return
+		}
+	} else {
+		updatedProxy, err = api.Database.UpdateWorkspaceProxy(ctx, database.UpdateWorkspaceProxyParams{
+			Name:        req.Name,
+			DisplayName: req.DisplayName,
+			Icon:        req.Icon,
+			ID:          proxy.ID,
+			// If hashedSecret is nil or empty, this will not update the secret.
+			TokenHashedSecret: hashedSecret,
+		})
+		if httpapi.Is404Error(err) {
+			httpapi.ResourceNotFound(rw)
+			return
+		}
+		if err != nil {
+			httpapi.InternalServerError(rw, err)
+			return
+		}
 	}
 
 	aReq.New = updatedProxy
@@ -157,6 +160,68 @@ func (api *API) patchWorkspaceProxy(rw http.ResponseWriter, r *http.Request) {
 
 	// Update the proxy cache.
 	go api.forceWorkspaceProxyHealthUpdate(api.ctx)
+}
+
+// patchPrimaryWorkspaceProxy handles the special case of updating the default
+func (api *API) patchPrimaryWorkspaceProxy(req codersdk.PatchWorkspaceProxy, rw http.ResponseWriter, r *http.Request) (database.WorkspaceProxy, bool) {
+	var (
+		ctx   = r.Context()
+		proxy = httpmw.WorkspaceProxyParam(r)
+	)
+
+	// User is editing the default primary proxy.
+	if req.Name != "" && req.Name != proxy.Name {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "Cannot update name of default primary proxy, did you mean to update the 'display name'?",
+			Validations: []codersdk.ValidationError{
+				{Field: "name", Detail: "Cannot update name of default primary proxy"},
+			},
+		})
+		return database.WorkspaceProxy{}, false
+	}
+	if req.DisplayName == "" && req.Icon == "" {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "No update arguments provided. Nothing to do.",
+			Validations: []codersdk.ValidationError{
+				{Field: "display_name", Detail: "No value provided."},
+				{Field: "icon", Detail: "No value provided."},
+			},
+		})
+		return database.WorkspaceProxy{}, false
+	}
+
+	args := database.UpsertDefaultProxyParams{
+		DisplayName: req.DisplayName,
+		IconUrl:     req.Icon,
+	}
+	if req.DisplayName == "" || req.Icon == "" {
+		// If the user has not specified an update value, use the existing value.
+		existing, err := api.Database.GetDefaultProxyConfig(ctx)
+		if err != nil {
+			httpapi.InternalServerError(rw, err)
+			return database.WorkspaceProxy{}, false
+		}
+		if req.DisplayName == "" {
+			args.DisplayName = existing.DisplayName
+		}
+		if req.Icon == "" {
+			args.IconUrl = existing.IconUrl
+		}
+	}
+
+	err := api.Database.UpsertDefaultProxy(ctx, args)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return database.WorkspaceProxy{}, false
+	}
+
+	// Use the primary region to fetch the default proxy values.
+	updatedProxy, err := api.AGPL.PrimaryWorkspaceProxy(ctx)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return database.WorkspaceProxy{}, false
+	}
+	return updatedProxy, true
 }
 
 // @Summary Delete workspace proxy
@@ -181,6 +246,13 @@ func (api *API) deleteWorkspaceProxy(rw http.ResponseWriter, r *http.Request) {
 	)
 	aReq.Old = proxy
 	defer commitAudit()
+
+	if proxy.IsPrimary() {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "Cannot delete primary proxy",
+		})
+		return
+	}
 
 	err := api.Database.UpdateWorkspaceProxyDeleted(ctx, database.UpdateWorkspaceProxyDeletedParams{
 		ID:      proxy.ID,
@@ -323,19 +395,41 @@ func validateProxyURL(u string) error {
 // @Security CoderSessionToken
 // @Produce json
 // @Tags Enterprise
-// @Success 200 {array} codersdk.WorkspaceProxy
+// @Success 200 {array} codersdk.RegionsResponse[codersdk.WorkspaceProxy]
 // @Router /workspaceproxies [get]
 func (api *API) workspaceProxies(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	proxies, err := api.Database.GetWorkspaceProxies(ctx)
-	if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
+	proxies, err := api.fetchWorkspaceProxies(r.Context())
+	if err != nil {
+		if dbauthz.IsNotAuthorizedError(err) {
+			httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
+				Message: "You are not authorized to use this endpoint.",
+			})
+			return
+		}
 		httpapi.InternalServerError(rw, err)
 		return
 	}
+	httpapi.Write(ctx, rw, http.StatusOK, proxies)
+}
+
+func (api *API) fetchWorkspaceProxies(ctx context.Context) (codersdk.RegionsResponse[codersdk.WorkspaceProxy], error) {
+	proxies, err := api.Database.GetWorkspaceProxies(ctx)
+	if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
+		return codersdk.RegionsResponse[codersdk.WorkspaceProxy]{}, err
+	}
+
+	// Add the primary as well
+	primaryProxy, err := api.AGPL.PrimaryWorkspaceProxy(ctx)
+	if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
+		return codersdk.RegionsResponse[codersdk.WorkspaceProxy]{}, err
+	}
+	proxies = append([]database.WorkspaceProxy{primaryProxy}, proxies...)
 
 	statues := api.ProxyHealth.HealthStatus()
-	httpapi.Write(ctx, rw, http.StatusOK, convertProxies(proxies, statues))
+	return codersdk.RegionsResponse[codersdk.WorkspaceProxy]{
+		Regions: convertProxies(proxies, statues),
+	}, nil
 }
 
 // @Summary Issue signed workspace app token
@@ -610,20 +704,39 @@ func convertProxies(p []database.WorkspaceProxy, statuses map[uuid.UUID]proxyhea
 	return resp
 }
 
+func convertRegion(proxy database.WorkspaceProxy, status proxyhealth.ProxyStatus) codersdk.Region {
+	return codersdk.Region{
+		ID:               proxy.ID,
+		Name:             proxy.Name,
+		DisplayName:      proxy.DisplayName,
+		IconURL:          proxy.Icon,
+		Healthy:          status.Status == proxyhealth.Healthy,
+		PathAppURL:       proxy.Url,
+		WildcardHostname: proxy.WildcardHostname,
+	}
+}
+
 func convertProxy(p database.WorkspaceProxy, status proxyhealth.ProxyStatus) codersdk.WorkspaceProxy {
+	if p.IsPrimary() {
+		// Primary is always healthy since the primary serves the api that this
+		// is returned from.
+		u, _ := url.Parse(p.Url)
+		status = proxyhealth.ProxyStatus{
+			Proxy:     p,
+			ProxyHost: u.Host,
+			Status:    proxyhealth.Healthy,
+			Report:    codersdk.ProxyHealthReport{},
+			CheckedAt: time.Now(),
+		}
+	}
 	if status.Status == "" {
 		status.Status = proxyhealth.Unknown
 	}
 	return codersdk.WorkspaceProxy{
-		ID:               p.ID,
-		Name:             p.Name,
-		DisplayName:      p.DisplayName,
-		Icon:             p.Icon,
-		URL:              p.Url,
-		WildcardHostname: p.WildcardHostname,
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
-		Deleted:          p.Deleted,
+		Region:    convertRegion(p, status),
+		CreatedAt: p.CreatedAt,
+		UpdatedAt: p.UpdatedAt,
+		Deleted:   p.Deleted,
 		Status: codersdk.WorkspaceProxyStatus{
 			Status:    codersdk.ProxyHealthStatus(status.Status),
 			Report:    status.Report,

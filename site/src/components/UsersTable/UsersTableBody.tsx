@@ -15,6 +15,7 @@ import { TableLoaderSkeleton } from "../TableLoader/TableLoader"
 import { TableRowMenu } from "../TableRowMenu/TableRowMenu"
 import { EditRolesButton } from "components/EditRolesButton/EditRolesButton"
 import { Stack } from "components/Stack/Stack"
+import { EnterpriseBadge } from "components/DeploySettingsLayout/Badges"
 
 const isOwnerRole = (role: TypesGen.Role): boolean => {
   return role.name === "owner"
@@ -34,9 +35,11 @@ interface UsersTableBodyProps {
   isUpdatingUserRoles?: boolean
   canEditUsers?: boolean
   isLoading?: boolean
+  canViewActivity?: boolean
   onSuspendUser: (user: TypesGen.User) => void
   onDeleteUser: (user: TypesGen.User) => void
   onListWorkspaces: (user: TypesGen.User) => void
+  onViewActivity: (user: TypesGen.User) => void
   onActivateUser: (user: TypesGen.User) => void
   onResetUserPassword: (user: TypesGen.User) => void
   onUpdateUserRoles: (
@@ -55,11 +58,13 @@ export const UsersTableBody: FC<
   onSuspendUser,
   onDeleteUser,
   onListWorkspaces,
+  onViewActivity,
   onActivateUser,
   onResetUserPassword,
   onUpdateUserRoles,
   isUpdatingUserRoles,
   canEditUsers,
+  canViewActivity,
   isLoading,
   isNonInitialPage,
   actorID,
@@ -165,14 +170,18 @@ export const UsersTableBody: FC<
                           (user.status === "active"
                             ? [
                                 {
-                                  label: t("suspendMenuItem"),
+                                  label: t(
+                                    "suspendMenuItem",
+                                  ) as React.ReactNode,
                                   onClick: onSuspendUser,
                                   disabled: false,
                                 },
                               ]
                             : [
                                 {
-                                  label: t("activateMenuItem"),
+                                  label: t(
+                                    "activateMenuItem",
+                                  ) as React.ReactNode,
                                   onClick: onActivateUser,
                                   disabled: false,
                                 },
@@ -184,14 +193,24 @@ export const UsersTableBody: FC<
                               disabled: user.id === actorID,
                             },
                             {
+                              label: t("resetPasswordMenuItem"),
+                              onClick: onResetUserPassword,
+                              disabled: false,
+                            },
+                            {
                               label: t("listWorkspacesMenuItem"),
                               onClick: onListWorkspaces,
                               disabled: false,
                             },
                             {
-                              label: t("resetPasswordMenuItem"),
-                              onClick: onResetUserPassword,
-                              disabled: false,
+                              label: (
+                                <>
+                                  View activity
+                                  {!canViewActivity && <EnterpriseBadge />}
+                                </>
+                              ),
+                              onClick: onViewActivity,
+                              disabled: !canViewActivity,
                             },
                           )
                         }

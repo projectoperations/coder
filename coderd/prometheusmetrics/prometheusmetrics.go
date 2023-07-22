@@ -15,7 +15,6 @@ import (
 	"tailscale.com/tailcfg"
 
 	"cdr.dev/slog"
-
 	"github.com/coder/coder/coderd/database"
 	"github.com/coder/coder/coderd/database/db2sdk"
 	"github.com/coder/coder/coderd/database/dbauthz"
@@ -98,7 +97,32 @@ func Workspaces(ctx context.Context, registerer prometheus.Registerer, db databa
 	ctx, cancelFunc := context.WithCancel(ctx)
 	done := make(chan struct{})
 
-	ticker := time.NewTicker(duration)
+	// Use time.Nanosecond to force an initial tick. It will be reset to the
+	// correct duration after executing once.
+	ticker := time.NewTicker(time.Nanosecond)
+	doTick := func() {
+		defer ticker.Reset(duration)
+
+		builds, err := db.GetLatestWorkspaceBuilds(ctx)
+		if err != nil {
+			return
+		}
+		jobIDs := make([]uuid.UUID, 0, len(builds))
+		for _, build := range builds {
+			jobIDs = append(jobIDs, build.JobID)
+		}
+		jobs, err := db.GetProvisionerJobsByIDs(ctx, jobIDs)
+		if err != nil {
+			return
+		}
+
+		gauge.Reset()
+		for _, job := range jobs {
+			status := db2sdk.ProvisionerJobStatus(job)
+			gauge.WithLabelValues(string(status)).Add(1)
+		}
+	}
+
 	go func() {
 		defer close(done)
 		defer ticker.Stop()
@@ -107,25 +131,7 @@ func Workspaces(ctx context.Context, registerer prometheus.Registerer, db databa
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-			}
-
-			builds, err := db.GetLatestWorkspaceBuilds(ctx)
-			if err != nil {
-				continue
-			}
-			jobIDs := make([]uuid.UUID, 0, len(builds))
-			for _, build := range builds {
-				jobIDs = append(jobIDs, build.JobID)
-			}
-			jobs, err := db.GetProvisionerJobsByIDs(ctx, jobIDs)
-			if err != nil {
-				continue
-			}
-
-			gauge.Reset()
-			for _, job := range jobs {
-				status := db2sdk.ProvisionerJobStatus(job)
-				gauge.WithLabelValues(string(status)).Add(1)
+				doTick()
 			}
 		}
 	}()
@@ -146,7 +152,7 @@ func Agents(ctx context.Context, logger slog.Logger, registerer prometheus.Regis
 		Subsystem: "agents",
 		Name:      "up",
 		Help:      "The number of active agents per workspace.",
-	}, []string{usernameLabel, workspaceNameLabel}))
+	}, []string{usernameLabel, workspaceNameLabel, "template_name", "template_version"}))
 	err := registerer.Register(agentsGauge)
 	if err != nil {
 		return nil, err
@@ -202,7 +208,9 @@ func Agents(ctx context.Context, logger slog.Logger, registerer prometheus.Regis
 	ctx = dbauthz.AsSystemRestricted(ctx)
 	done := make(chan struct{})
 
-	ticker := time.NewTicker(duration)
+	// Use time.Nanosecond to force an initial tick. It will be reset to the
+	// correct duration after executing once.
+	ticker := time.NewTicker(time.Nanosecond)
 	go func() {
 		defer close(done)
 		defer ticker.Stop()
@@ -213,7 +221,7 @@ func Agents(ctx context.Context, logger slog.Logger, registerer prometheus.Regis
 			case <-ticker.C:
 			}
 
-			logger.Debug(ctx, "Agent metrics collection is starting")
+			logger.Debug(ctx, "agent metrics collection is starting")
 			timer := prometheus.NewTimer(metricsCollectorAgents)
 
 			workspaceRows, err := db.GetWorkspaces(ctx, database.GetWorkspacesParams{
@@ -225,29 +233,35 @@ func Agents(ctx context.Context, logger slog.Logger, registerer prometheus.Regis
 			}
 
 			for _, workspace := range workspaceRows {
+				templateName := workspace.TemplateName
+				templateVersionName := workspace.TemplateVersionName.String
+				if !workspace.TemplateVersionName.Valid {
+					templateVersionName = "unknown"
+				}
+
 				user, err := db.GetUserByID(ctx, workspace.OwnerID)
 				if err != nil {
-					logger.Error(ctx, "can't get user", slog.F("user_id", workspace.OwnerID), slog.Error(err))
-					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name)
+					logger.Error(ctx, "can't get user from the database", slog.F("user_id", workspace.OwnerID), slog.Error(err))
+					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name, templateName, templateVersionName)
 					continue
 				}
 
 				agents, err := db.GetWorkspaceAgentsInLatestBuildByWorkspaceID(ctx, workspace.ID)
 				if err != nil {
 					logger.Error(ctx, "can't get workspace agents", slog.F("workspace_id", workspace.ID), slog.Error(err))
-					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name)
+					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name, templateName, templateVersionName)
 					continue
 				}
 
 				if len(agents) == 0 {
 					logger.Debug(ctx, "workspace agents are unavailable", slog.F("workspace_id", workspace.ID))
-					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name)
+					agentsGauge.WithLabelValues(VectorOperationAdd, 0, user.Username, workspace.Name, templateName, templateVersionName)
 					continue
 				}
 
 				for _, agent := range agents {
 					// Collect information about agents
-					agentsGauge.WithLabelValues(VectorOperationAdd, 1, user.Username, workspace.Name)
+					agentsGauge.WithLabelValues(VectorOperationAdd, 1, user.Username, workspace.Name, templateName, templateVersionName)
 
 					connectionStatus := agent.Status(agentInactiveDisconnectTimeout)
 					node := (*coordinator.Load()).Node(agent.ID)
@@ -305,9 +319,8 @@ func Agents(ctx context.Context, logger slog.Logger, registerer prometheus.Regis
 			agentsAppsGauge.Commit()
 
 		done:
-			logger.Debug(ctx, "Agent metrics collection is done")
-			metricsCollectorAgents.Observe(timer.ObserveDuration().Seconds())
-
+			logger.Debug(ctx, "agent metrics collection is done")
+			timer.ObserveDuration()
 			ticker.Reset(duration)
 		}
 	}()
@@ -426,7 +439,9 @@ func AgentStats(ctx context.Context, logger slog.Logger, registerer prometheus.R
 	done := make(chan struct{})
 
 	createdAfter := initialCreateAfter
-	ticker := time.NewTicker(duration)
+	// Use time.Nanosecond to force an initial tick. It will be reset to the
+	// correct duration after executing once.
+	ticker := time.NewTicker(time.Nanosecond)
 	go func() {
 		defer close(done)
 		defer ticker.Stop()
@@ -437,7 +452,7 @@ func AgentStats(ctx context.Context, logger slog.Logger, registerer prometheus.R
 			case <-ticker.C:
 			}
 
-			logger.Debug(ctx, "Agent metrics collection is starting")
+			logger.Debug(ctx, "agent metrics collection is starting")
 			timer := prometheus.NewTimer(metricsCollectorAgentStats)
 
 			checkpoint := time.Now()
@@ -472,8 +487,8 @@ func AgentStats(ctx context.Context, logger slog.Logger, registerer prometheus.R
 				}
 			}
 
-			logger.Debug(ctx, "Agent metrics collection is done")
-			metricsCollectorAgentStats.Observe(timer.ObserveDuration().Seconds())
+			logger.Debug(ctx, "agent metrics collection is done", slog.F("len", len(stats)))
+			timer.ObserveDuration()
 
 			createdAfter = checkpoint
 			ticker.Reset(duration)

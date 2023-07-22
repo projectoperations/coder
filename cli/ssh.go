@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -27,7 +26,6 @@ import (
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/sloghuman"
 
-	"github.com/coder/coder/agent/agentssh"
 	"github.com/coder/coder/cli/clibase"
 	"github.com/coder/coder/cli/cliui"
 	"github.com/coder/coder/coderd/autobuild/notify"
@@ -42,6 +40,7 @@ var (
 	autostopNotifyCountdown = []time.Duration{30 * time.Minute}
 )
 
+//nolint:gocyclo
 func (r *RootCmd) ssh() *clibase.Cmd {
 	var (
 		stdio          bool
@@ -49,9 +48,10 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 		forwardGPG     bool
 		identityAgent  string
 		wsPollInterval time.Duration
+		waitEnum       string
 		noWait         bool
-		logDir         string
-		logToFile      bool
+		logDirPath     string
+		remoteForward  string
 	)
 	client := new(codersdk.Client)
 	cmd := &clibase.Cmd{
@@ -74,35 +74,90 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 					logger.Error(ctx, "command exit", slog.Error(retErr))
 				}
 			}()
-			if logToFile {
-				// we need a way to ensure different ssh invocations don't clobber
-				// each other's logs. Date-time strings will likely have collisions
-				// in unit tests and/or scripts unless we extend precision out to
-				// sub-millisecond, which seems unwieldy.  A simple 5-character random
-				// string will do it, since the operating system already tracks
-				// dates and times for file IO.
-				qual, err := cryptorand.String(5)
+
+			// This WaitGroup solves for a race condition where we were logging
+			// while closing the log file in a defer. It probably solves
+			// others too.
+			var wg sync.WaitGroup
+			wg.Add(1)
+			defer wg.Done()
+
+			if logDirPath != "" {
+				nonce, err := cryptorand.StringCharset(cryptorand.Lower, 5)
 				if err != nil {
-					return xerrors.Errorf("generate random qualifier: %w", err)
+					return xerrors.Errorf("generate nonce: %w", err)
 				}
-				logPth := path.Join(logDir, fmt.Sprintf("coder-ssh-%s.log", qual))
-				logFile, err := os.Create(logPth)
+				logFilePath := filepath.Join(
+					logDirPath,
+					fmt.Sprintf(
+						"coder-ssh-%s-%s.log",
+						// The time portion makes it easier to find the right
+						// log file.
+						time.Now().Format("20060102-150405"),
+						// The nonce prevents collisions, as SSH invocations
+						// frequently happen in parallel.
+						nonce,
+					),
+				)
+				logFile, err := os.OpenFile(
+					logFilePath,
+					os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_EXCL,
+					0o600,
+				)
 				if err != nil {
-					return xerrors.Errorf("error opening %s for logging: %w", logPth, err)
+					return xerrors.Errorf("error opening %s for logging: %w", logDirPath, err)
 				}
+				go func() {
+					wg.Wait()
+					_ = logFile.Close()
+				}()
+
 				logger = slog.Make(sloghuman.Sink(logFile))
-				defer logFile.Close()
 				if r.verbose {
 					logger = logger.Leveled(slog.LevelDebug)
 				}
 
 				// log HTTP requests
-				client.Logger = logger
+				client.SetLogger(logger)
+			}
+
+			if remoteForward != "" {
+				isValid := validateRemoteForward(remoteForward)
+				if !isValid {
+					return xerrors.Errorf(`invalid format of remote-forward, expected: remote_port:local_address:local_port`)
+				}
+				if isValid && stdio {
+					return xerrors.Errorf(`remote-forward can't be enabled in the stdio mode`)
+				}
 			}
 
 			workspace, workspaceAgent, err := getWorkspaceAndAgent(ctx, inv, client, codersdk.Me, inv.Args[0])
 			if err != nil {
 				return err
+			}
+
+			// Select the startup script behavior based on template configuration or flags.
+			var wait bool
+			switch waitEnum {
+			case "yes":
+				wait = true
+			case "no":
+				wait = false
+			case "auto":
+				switch workspaceAgent.StartupScriptBehavior {
+				case codersdk.WorkspaceAgentStartupScriptBehaviorBlocking:
+					wait = true
+				case codersdk.WorkspaceAgentStartupScriptBehaviorNonBlocking:
+					wait = false
+				default:
+					return xerrors.Errorf("unknown startup script behavior %q", workspaceAgent.StartupScriptBehavior)
+				}
+			default:
+				return xerrors.Errorf("unknown wait value %q", waitEnum)
+			}
+			// The `--no-wait` flag is deprecated, but for now, check it.
+			if noWait {
+				wait = false
 			}
 
 			templateVersion, err := client.TemplateVersion(ctx, workspace.LatestBuild.TemplateVersionID)
@@ -129,34 +184,30 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 
 			// OpenSSH passes stderr directly to the calling TTY.
 			// This is required in "stdio" mode so a connecting indicator can be displayed.
-			err = cliui.Agent(ctx, inv.Stderr, cliui.AgentOptions{
-				WorkspaceName: workspace.Name,
-				Fetch: func(ctx context.Context) (codersdk.WorkspaceAgent, error) {
-					return client.WorkspaceAgent(ctx, workspaceAgent.ID)
-				},
-				NoWait: noWait,
+			err = cliui.Agent(ctx, inv.Stderr, workspaceAgent.ID, cliui.AgentOptions{
+				Fetch:     client.WorkspaceAgent,
+				FetchLogs: client.WorkspaceAgentStartupLogsAfter,
+				Wait:      wait,
 			})
 			if err != nil {
 				if xerrors.Is(err, context.Canceled) {
 					return cliui.Canceled
 				}
-				if !xerrors.Is(err, cliui.AgentStartError) {
-					return xerrors.Errorf("await agent: %w", err)
-				}
-
-				// We don't want to fail on a startup script error because it's
-				// natural that the user will want to fix the script and try again.
-				// We don't print the error because cliui.Agent does that for us.
 			}
 
+			if r.disableDirect {
+				_, _ = fmt.Fprintln(inv.Stderr, "Direct connections disabled.")
+			}
 			conn, err := client.DialWorkspaceAgent(ctx, workspaceAgent.ID, &codersdk.DialWorkspaceAgentOptions{
-				Logger: logger,
+				Logger:         logger,
+				BlockEndpoints: r.disableDirect,
 			})
 			if err != nil {
 				return xerrors.Errorf("dial agent: %w", err)
 			}
 			defer conn.Close()
 			conn.AwaitReachable(ctx)
+
 			stopPolling := tryPollWorkspaceAutostop(ctx, client, workspace)
 			defer stopPolling()
 
@@ -166,9 +217,18 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 					return xerrors.Errorf("connect SSH: %w", err)
 				}
 				defer rawSSH.Close()
-				go watchAndClose(ctx, rawSSH.Close, logger, client, workspace)
 
+				wg.Add(1)
 				go func() {
+					defer wg.Done()
+					watchAndClose(ctx, func() error {
+						return rawSSH.Close()
+					}, logger, client, workspace)
+				}()
+
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
 					// Ensure stdout copy closes incase stdin is closed
 					// unexpectedly. Typically we wouldn't worry about
 					// this since OpenSSH should kill the proxy command.
@@ -201,19 +261,24 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 				return xerrors.Errorf("ssh session: %w", err)
 			}
 			defer sshSession.Close()
-			go watchAndClose(
-				ctx,
-				func() error {
-					err := sshSession.Close()
-					logger.Debug(ctx, "session close", slog.Error(err))
-					err = sshClient.Close()
-					logger.Debug(ctx, "client close", slog.Error(err))
-					return nil
-				},
-				logger,
-				client,
-				workspace,
-			)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				watchAndClose(
+					ctx,
+					func() error {
+						err := sshSession.Close()
+						logger.Debug(ctx, "session close", slog.Error(err))
+						err = sshClient.Close()
+						logger.Debug(ctx, "client close", slog.Error(err))
+						return nil
+					},
+					logger,
+					client,
+					workspace,
+				)
+			}()
 
 			if identityAgent == "" {
 				identityAgent = os.Getenv("SSH_AUTH_SOCK")
@@ -241,6 +306,19 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 				closer, err := forwardGPGAgent(ctx, inv.Stderr, sshClient)
 				if err != nil {
 					return xerrors.Errorf("forward GPG socket: %w", err)
+				}
+				defer closer.Close()
+			}
+
+			if remoteForward != "" {
+				localAddr, remoteAddr, err := parseRemoteForward(remoteForward)
+				if err != nil {
+					return err
+				}
+
+				closer, err := sshRemoteForward(ctx, inv.Stderr, sshClient, localAddr, remoteAddr)
+				if err != nil {
+					return xerrors.Errorf("ssh remote forward: %w", err)
 				}
 				defer closer.Close()
 			}
@@ -313,6 +391,13 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 			return nil
 		},
 	}
+	waitOption := clibase.Option{
+		Flag:        "wait",
+		Env:         "CODER_SSH_WAIT",
+		Description: "Specifies whether or not to wait for the startup script to finish executing. Auto means that the agent startup script behavior configured in the workspace template is used.",
+		Default:     "auto",
+		Value:       clibase.EnumOf(&waitEnum, "yes", "no", "auto"),
+	}
 	cmd.Options = clibase.OptionSet{
 		{
 			Flag:        "stdio",
@@ -347,25 +432,27 @@ func (r *RootCmd) ssh() *clibase.Cmd {
 			Default:     "1m",
 			Value:       clibase.DurationOf(&wsPollInterval),
 		},
+		waitOption,
 		{
 			Flag:        "no-wait",
 			Env:         "CODER_SSH_NO_WAIT",
-			Description: "Specifies whether to wait for a workspace to become ready before logging in (only applicable when the login before ready option has not been enabled). Note that the workspace agent may still be in the process of executing the startup script and the workspace may be in an incomplete state.",
+			Description: "Enter workspace immediately after the agent has connected. This is the default if the template has configured the agent startup script behavior as non-blocking.",
 			Value:       clibase.BoolOf(&noWait),
+			UseInstead:  []clibase.Option{waitOption},
 		},
 		{
-			Flag:        "log-dir",
-			Default:     os.TempDir(),
-			Description: "Specify the location for the log files.",
-			Env:         "CODER_SSH_LOG_DIR",
-			Value:       clibase.StringOf(&logDir),
-		},
-		{
-			Flag:          "log-to-file",
+			Flag:          "log-dir",
+			Description:   "Specify the directory containing SSH diagnostic log files.",
+			Env:           "CODER_SSH_LOG_DIR",
 			FlagShorthand: "l",
-			Env:           "CODER_SSH_LOG_TO_FILE",
-			Description:   "Enable diagnostic logging to file.",
-			Value:         clibase.BoolOf(&logToFile),
+			Value:         clibase.StringOf(&logDirPath),
+		},
+		{
+			Flag:          "remote-forward",
+			Description:   "Enable remote port forwarding (remote_port:local_address:local_port).",
+			Env:           "CODER_SSH_REMOTE_FORWARD",
+			FlagShorthand: "R",
+			Value:         clibase.StringOf(&remoteForward),
 		},
 	}
 	return cmd
@@ -393,7 +480,7 @@ func watchAndClose(ctx context.Context, closer func() error, logger slog.Logger,
 
 startWatchLoop:
 	for {
-		logger.Debug(ctx, "(re)connecting to the coder server to watch workspace events.")
+		logger.Debug(ctx, "connecting to the coder server to watch workspace events")
 		var wsWatch <-chan codersdk.Workspace
 		var err error
 		for r := retry.New(time.Second, 15*time.Second); r.Wait(ctx); {
@@ -402,7 +489,7 @@ startWatchLoop:
 				break
 			}
 			if ctx.Err() != nil {
-				logger.Info(ctx, "context expired", slog.Error(ctx.Err()))
+				logger.Debug(ctx, "context expired", slog.Error(ctx.Err()))
 				return
 			}
 		}
@@ -410,7 +497,7 @@ startWatchLoop:
 		for {
 			select {
 			case <-ctx.Done():
-				logger.Info(ctx, "context expired", slog.Error(ctx.Err()))
+				logger.Debug(ctx, "context expired", slog.Error(ctx.Err()))
 				return
 			case w, ok := <-wsWatch:
 				if !ok {
@@ -511,8 +598,15 @@ func getWorkspaceAndAgent(ctx context.Context, inv *clibase.Invocation, client *
 // of the CLI running simultaneously.
 func tryPollWorkspaceAutostop(ctx context.Context, client *codersdk.Client, workspace codersdk.Workspace) (stop func()) {
 	lock := flock.New(filepath.Join(os.TempDir(), "coder-autostop-notify-"+workspace.ID.String()))
-	condition := notifyCondition(ctx, client, workspace.ID, lock)
-	return notify.Notify(condition, workspacePollInterval, autostopNotifyCountdown...)
+	conditionCtx, cancelCondition := context.WithCancel(ctx)
+	condition := notifyCondition(conditionCtx, client, workspace.ID, lock)
+	stopFunc := notify.Notify(condition, workspacePollInterval, autostopNotifyCountdown...)
+	return func() {
+		// With many "ssh" processes running, `lock.TryLockContext` can be hanging until the context canceled.
+		// Without this cancellation, a CLI process with failed remote-forward could be hanging indefinitely.
+		cancelCondition()
+		stopFunc()
+	}
 }
 
 // Notify the user if the workspace is due to shutdown.
@@ -694,57 +788,4 @@ func remoteGPGAgentSocket(sshClient *gossh.Client) (string, error) {
 	}
 
 	return string(bytes.TrimSpace(remoteSocket)), nil
-}
-
-// cookieAddr is a special net.Addr accepted by sshForward() which includes a
-// cookie which is written to the connection before forwarding.
-type cookieAddr struct {
-	net.Addr
-	cookie []byte
-}
-
-// sshForwardRemote starts forwarding connections from a remote listener to a
-// local address via SSH in a goroutine.
-//
-// Accepts a `cookieAddr` as the local address.
-func sshForwardRemote(ctx context.Context, stderr io.Writer, sshClient *gossh.Client, localAddr, remoteAddr net.Addr) (io.Closer, error) {
-	listener, err := sshClient.Listen(remoteAddr.Network(), remoteAddr.String())
-	if err != nil {
-		return nil, xerrors.Errorf("listen on remote SSH address %s: %w", remoteAddr.String(), err)
-	}
-
-	go func() {
-		for {
-			remoteConn, err := listener.Accept()
-			if err != nil {
-				if ctx.Err() == nil {
-					_, _ = fmt.Fprintf(stderr, "Accept SSH listener connection: %+v\n", err)
-				}
-				return
-			}
-
-			go func() {
-				defer remoteConn.Close()
-
-				localConn, err := net.Dial(localAddr.Network(), localAddr.String())
-				if err != nil {
-					_, _ = fmt.Fprintf(stderr, "Dial local address %s: %+v\n", localAddr.String(), err)
-					return
-				}
-				defer localConn.Close()
-
-				if c, ok := localAddr.(cookieAddr); ok {
-					_, err = localConn.Write(c.cookie)
-					if err != nil {
-						_, _ = fmt.Fprintf(stderr, "Write cookie to local connection: %+v\n", err)
-						return
-					}
-				}
-
-				agentssh.Bicopy(ctx, localConn, remoteConn)
-			}()
-		}
-	}()
-
-	return listener, nil
 }

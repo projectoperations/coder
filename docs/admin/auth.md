@@ -231,7 +231,7 @@ CODER_TLS_CLIENT_KEY_FILE=/path/to/key.pem
 If your OpenID Connect provider supports group claims, you can configure Coder
 to synchronize groups in your auth provider to groups within Coder.
 
-To enable group sync, ensure that the `groups` claim is set. If group sync is
+To enable group sync, ensure that the `groups` claim is set by adding the correct scope to request. If group sync is
 enabled, the user's groups will be controlled by the OIDC provider. This means
 manual group additions/removals will be overwritten on the next login.
 
@@ -240,6 +240,15 @@ manual group additions/removals will be overwritten on the next login.
 CODER_OIDC_SCOPES=openid,profile,email,groups
 # as a flag
 --oidc-scopes openid,profile,email,groups
+```
+
+With the `groups` scope requested, we also need to map the `groups` claim name. Coder recommends using `groups` for the claim name. This step is necessary if your **scope's name** is something other than `groups`.
+
+```console
+# as an environment variable
+CODER_OIDC_GROUP_FIELD=groups
+# as a flag
+--oidc-group-field groups
 ```
 
 On login, users will automatically be assigned to groups that have matching
@@ -272,6 +281,32 @@ OIDC provider will be added to the `myCoderGroupName` group in Coder.
 > **Note:** Groups are only updated on login.
 
 [azure-gids]: https://github.com/MicrosoftDocs/azure-docs/issues/59766#issuecomment-664387195
+
+### Troubleshooting
+
+Some common issues when enabling group sync.
+
+#### Invalid Scope
+
+If you see an error like the following, you may have an invalid scope.
+
+```console
+The application '<oidc_application>' asked for scope 'groups' that doesn't exist on the resource...
+```
+
+This can happen because the identity provider has a different name for the scope. For example, Azure AD uses `GroupMember.Read.All` instead of `groups`. You can find the correct scope name in the IDP's documentation. Some IDP's allow configuring the name of this scope.
+
+The solution is to update the value of `CODER_OIDC_SCOPES` to the correct value for the identity provider.
+
+#### No `group` claim in the `got oidc claims` log
+
+Steps to troubleshoot.
+
+1. Ensure the user is a part of a group in the IDP. If the user has 0 groups, no `groups` claim will be sent.
+2. Check if another claim appears to be the correct claim with a different name. A common name is `memberOf` instead of `groups`. If this is present, update `CODER_OIDC_GROUP_FIELD=memberOf`.
+3. Make sure the number of groups being sent is under the limit of the IDP. Some IDPs will return an error, while others will just omit the `groups` claim. A common solution is to create a filter on the identity provider that returns less than the limit for your IDP.
+   - [Azure AD limit is 200, and omits groups if exceeded.](https://learn.microsoft.com/en-us/azure/active-directory/hybrid/connect/how-to-connect-fed-group-claims#options-for-applications-to-consume-group-information)
+   - [Okta limit is 100, and returns an error if exceeded.](https://developer.okta.com/docs/reference/api/oidc/#scope-dependent-claims-not-always-returned)
 
 ## Provider-Specific Guides
 
@@ -319,3 +354,11 @@ Below are some details specific to individual OIDC providers.
      ```
 
    - (Optional) If using Group Sync, send the required groups in the configured groups claim field. See [here](https://stackoverflow.com/a/55570286) for an example.
+
+### Keycloak
+
+The access_type parameter has two possible values: "online" and "offline." By default, the value is set to "offline". This means that when a user authenticates using OIDC, the application requests offline access to the user's resources, including the ability to refresh access tokens without requiring the user to reauthenticate.
+
+To enable the `offline_access` scope, which allows for the refresh token functionality, you need to add it to the list of requested scopes during the authentication flow. Including the `offline_access` scope in the requested scopes ensures that the user is granted the necessary permissions to obtain refresh tokens.
+
+By combining the `{"access_type":"offline"}` parameter in the OIDC Auth URL with the `offline_access` scope, you can achieve the desired behavior of obtaining refresh tokens for offline access to the user's resources.

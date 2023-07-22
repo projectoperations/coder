@@ -9,7 +9,18 @@ runs:
   steps:
     - shell: bash
       run: |
-        npm install -g @datadog/datadog-ci
+        owner=${{ github.repository_owner	 }}
+        echo "owner: $owner"
+        if [[  $owner != "coder" ]]; then
+          echo "Not a pull request from the main repo, skipping..."
+          exit 0
+        fi
+        if [[ -z "${{ inputs.api-key }}" ]]; then
+          # This can happen for dependabot.
+          echo "No API key provided, skipping..."
+          exit 0
+        fi
+        npm install -g @datadog/datadog-ci@2.10.0
         datadog-ci junit upload --service coder ./gotests.xml \
           --tags os:${{runner.os}} --tags runner_name:${{runner.name}}
       env:

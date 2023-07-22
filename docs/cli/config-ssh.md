@@ -25,6 +25,15 @@ coder config-ssh [flags]
 
 ## Options
 
+### --coder-binary-path
+
+|             |                                            |
+| ----------- | ------------------------------------------ |
+| Type        | <code>string</code>                        |
+| Environment | <code>$CODER_SSH_CONFIG_BINARY_PATH</code> |
+
+Optionally specify the absolute path to the coder binary used in ProxyCommand. By default, the binary invoking this command ('config ssh') is used.
+
 ### -n, --dry-run
 
 |             |                                 |
@@ -46,9 +55,10 @@ Specifies the path to an SSH config.
 
 ### --ssh-host-prefix
 
-|      |                     |
-| ---- | ------------------- |
-| Type | <code>string</code> |
+|             |                                               |
+| ----------- | --------------------------------------------- |
+| Type        | <code>string</code>                           |
+| Environment | <code>$CODER_CONFIGSSH_SSH_HOST_PREFIX</code> |
 
 Override the default host prefix.
 
@@ -69,6 +79,16 @@ Specifies additional SSH options to embed in each host stanza.
 | Environment | <code>$CODER_SSH_USE_PREVIOUS_OPTIONS</code> |
 
 Specifies whether or not to keep options from previous run of config-ssh.
+
+### --wait
+
+|             |                                    |
+| ----------- | ---------------------------------- | --- | ------------ |
+| Type        | <code>enum[yes                     | no  | auto]</code> |
+| Environment | <code>$CODER_CONFIGSSH_WAIT</code> |
+| Default     | <code>auto</code>                  |
+
+Specifies whether or not to wait for the startup script to finish executing. Auto means that the agent startup script behavior configured in the workspace template is used.
 
 ### -y, --yes
 

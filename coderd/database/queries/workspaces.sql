@@ -75,7 +75,11 @@ WHERE
 
 -- name: GetWorkspaces :many
 SELECT
-	workspaces.*, COUNT(*) OVER () as count
+	workspaces.*,
+	COALESCE(template_name.template_name, 'unknown') as template_name,
+	latest_build.template_version_id,
+	latest_build.template_version_name,
+	COUNT(*) OVER () as count
 FROM
     workspaces
 JOIN
@@ -85,6 +89,8 @@ ON
 LEFT JOIN LATERAL (
 	SELECT
 		workspace_builds.transition,
+		workspace_builds.template_version_id,
+		template_versions.name AS template_version_name,
 		provisioner_jobs.id AS provisioner_job_id,
 		provisioner_jobs.started_at,
 		provisioner_jobs.updated_at,
@@ -97,6 +103,10 @@ LEFT JOIN LATERAL (
 		provisioner_jobs
 	ON
 		provisioner_jobs.id = workspace_builds.job_id
+	LEFT JOIN
+		template_versions
+	ON
+		template_versions.id = workspace_builds.template_version_id
 	WHERE
 		workspace_builds.workspace_id = workspaces.id
 	ORDER BY
@@ -104,6 +114,14 @@ LEFT JOIN LATERAL (
 	LIMIT
 		1
 ) latest_build ON TRUE
+LEFT JOIN LATERAL (
+	SELECT
+		templates.name AS template_name
+	FROM
+		templates
+	WHERE
+		templates.id = workspaces.template_id
+) template_name ON true
 WHERE
 	-- Optionally include deleted workspaces
 	workspaces.deleted = @deleted
@@ -157,10 +175,12 @@ WHERE
 					latest_build.canceled_at IS NULL AND
 					latest_build.completed_at IS NOT NULL AND
 					latest_build.updated_at - INTERVAL '30 seconds' < NOW() AND
-					latest_build.transition = 'delete'::workspace_transition
+					latest_build.transition = 'delete'::workspace_transition AND
+					-- If the error field is not null, the status is 'failed'
+					latest_build.error IS NULL
 
 				WHEN @status = 'deleting' THEN
-					latest_build.completed_at IS NOT NULL AND
+					latest_build.completed_at IS NULL AND
 					latest_build.canceled_at IS NULL AND
 					latest_build.error IS NULL AND
 					latest_build.transition = 'delete'::workspace_transition
@@ -173,13 +193,13 @@ WHERE
 	-- Filter by owner_id
 	AND CASE
 		WHEN @owner_id :: uuid != '00000000-0000-0000-0000-000000000000'::uuid THEN
-			owner_id = @owner_id
+			workspaces.owner_id = @owner_id
 		ELSE true
 	END
 	-- Filter by owner_name
 	AND CASE
 		WHEN @owner_username :: text != '' THEN
-			owner_id = (SELECT id FROM users WHERE lower(username) = lower(@owner_username) AND deleted = false)
+			workspaces.owner_id = (SELECT id FROM users WHERE lower(username) = lower(@owner_username) AND deleted = false)
 		ELSE true
 	END
 	-- Filter by template_name
@@ -187,19 +207,19 @@ WHERE
 	-- Use the organization filter to restrict to 1 org if needed.
 	AND CASE
 		WHEN @template_name :: text != '' THEN
-			template_id = ANY(SELECT id FROM templates WHERE lower(name) = lower(@template_name) AND deleted = false)
+			workspaces.template_id = ANY(SELECT id FROM templates WHERE lower(name) = lower(@template_name) AND deleted = false)
 		ELSE true
 	END
 	-- Filter by template_ids
 	AND CASE
 		WHEN array_length(@template_ids :: uuid[], 1) > 0 THEN
-			template_id = ANY(@template_ids)
+			workspaces.template_id = ANY(@template_ids)
 		ELSE true
 	END
 	-- Filter by name, matching on substring
 	AND CASE
 		WHEN @name :: text != '' THEN
-			name ILIKE '%' || @name || '%'
+			workspaces.name ILIKE '%' || @name || '%'
 		ELSE true
 	END
 	-- Filter by agent status
@@ -247,7 +267,7 @@ ORDER BY
 		latest_build.error IS NULL AND
 		latest_build.transition = 'start'::workspace_transition) DESC,
 	LOWER(users.username) ASC,
-	LOWER(name) ASC
+	LOWER(workspaces.name) ASC
 LIMIT
 	CASE
 		WHEN @limit_ :: integer > 0 THEN
@@ -327,20 +347,6 @@ SET
 WHERE
 	id = $1;
 
--- name: UpdateWorkspaceTTLToBeWithinTemplateMax :exec
-UPDATE
-	workspaces
-SET
-	ttl = LEAST(ttl, @template_max_ttl::bigint)
-WHERE
-	template_id = @template_id
-	-- LEAST() does not pick NULL, so filter it out as we don't want to set a
-	-- TTL on the workspace if it's unset.
-	--
-	-- During build time, the template max TTL will still be used if the
-	-- workspace TTL is NULL.
-	AND ttl IS NOT NULL;
-
 -- name: GetDeploymentWorkspaceStats :one
 WITH workspaces_with_jobs AS (
 	SELECT
@@ -403,13 +409,17 @@ SELECT
 	stopped_workspaces.count AS stopped_workspaces
 FROM pending_workspaces, building_workspaces, running_workspaces, failed_workspaces, stopped_workspaces;
 
--- name: GetWorkspacesEligibleForAutoStartStop :many
+-- name: GetWorkspacesEligibleForTransition :many
 SELECT
 	workspaces.*
 FROM
 	workspaces
 LEFT JOIN
 	workspace_builds ON workspace_builds.workspace_id = workspaces.id
+INNER JOIN
+	provisioner_jobs ON workspace_builds.job_id = provisioner_jobs.id
+INNER JOIN
+	templates ON workspaces.template_id = templates.id
 WHERE
 	workspace_builds.build_number = (
 		SELECT
@@ -439,5 +449,55 @@ WHERE
 		(
 			workspace_builds.transition = 'stop'::workspace_transition AND
 			workspaces.autostart_schedule IS NOT NULL
+		) OR
+
+		-- If the workspace's most recent job resulted in an error
+		-- it may be eligible for failed stop.
+		(
+			provisioner_jobs.error IS NOT NULL AND
+			provisioner_jobs.error != '' AND
+			workspace_builds.transition = 'start'::workspace_transition
+		) OR
+
+		-- If the workspace's template has an inactivity_ttl set
+		-- it may be eligible for locking.
+		(
+			templates.inactivity_ttl > 0 AND
+			workspaces.locked_at IS NULL
+		) OR
+
+		-- If the workspace's template has a locked_ttl set
+		-- and the workspace is already locked
+		(
+			templates.locked_ttl > 0 AND
+			workspaces.locked_at IS NOT NULL
 		)
-	);
+	) AND workspaces.deleted = 'false';
+
+-- name: UpdateWorkspaceLockedDeletingAt :exec
+UPDATE
+	workspaces
+SET
+	locked_at = $2,
+	-- When a workspace is unlocked we want to update the last_used_at to avoid the workspace getting re-locked.
+	-- if we're locking the workspace then we leave it alone.
+	last_used_at = CASE WHEN $2::timestamptz IS NULL THEN now() at time zone 'utc' ELSE last_used_at END,
+	-- If locked_at is null (meaning unlocked) or the template-defined locked_ttl is 0 we should set
+	-- deleting_at to NULL else set it to the locked_at + locked_ttl duration.
+	deleting_at = CASE WHEN $2::timestamptz IS NULL OR templates.locked_ttl = 0 THEN NULL ELSE $2::timestamptz + INTERVAL '1 milliseconds' * templates.locked_ttl / 1000000 END
+FROM
+	templates
+WHERE
+	workspaces.template_id = templates.id
+AND
+	workspaces.id = $1;
+
+-- name: UpdateWorkspacesDeletingAtByTemplateID :exec
+UPDATE
+	workspaces
+SET
+	deleting_at = CASE WHEN @locked_ttl_ms::bigint = 0 THEN NULL ELSE locked_at + interval '1 milliseconds' * @locked_ttl_ms::bigint END
+WHERE
+	template_id = @template_id
+AND
+	locked_at IS NOT NULL;

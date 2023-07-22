@@ -149,6 +149,25 @@ data "coder_parameter" "region" {
 It is allowed to modify the mutability state anytime. In case of emergency, template authors can temporarily allow for changing immutable parameters to fix an operational issue, but it is not
 advised to overuse this opportunity.
 
+## Ephemeral parameters
+
+Ephemeral parameters are introduced to users in the form of "build options." This functionality can be used to model
+specific behaviors within a Coder workspace, such as reverting to a previous image, restoring from a volume snapshot, or
+building a project without utilizing cache.
+
+As these parameters are ephemeral in nature, subsequent builds will proceed in the standard manner.
+
+```hcl
+data "coder_parameter" "force_rebuild" {
+  name         = "force_rebuild"
+  type         = "bool"
+  description  = "Rebuild the Docker image rather than use the cached one."
+  mutable      = true
+  default      = false
+  ephemeral    = true
+}
+```
+
 ## Validation
 
 Rich parameters support multiple validation modes - min, max, monotonic numbers, and regular expressions.
@@ -188,38 +207,22 @@ data "coder_parameter" "project_id" {
 
 ## Legacy
 
-Prior to Coder v0.16.0 (Jan 2023), parameters were defined via Terraform `variable` blocks. These "legacy parameters" can still be used in templates, but will be removed in May 2023.
+### Legacy parameters are unsupported now
 
-```hcl
-variable "use_kubeconfig" {
-  sensitive   = true # Template-level parameter (not editable when creating a workspace)
-  type        = bool
-  description = <<-EOF
-  Use host kubeconfig? (true/false)
-  EOF
-}
+In Coder, workspaces using legacy parameters can't be deployed anymore. To address this, it is necessary to either remove or adjust incompatible templates.
+In some cases, deleting a workspace with a hard dependency on a legacy parameter may be challenging. To cleanup unsupported workspaces, administrators are advised to take the following actions for affected templates:
 
-variable "cpu" {
-  sensitive   = false # User (workspace-level) parameter
-  description = "CPU (__ cores)"
-  default     = 2
-  validation {
-    condition = contains([
-      "2",
-      "4",
-      "6",
-      "8"
-    ], var.cpu)
-    error_message = "Invalid cpu!"
-  }
-}
-```
-
-> ⚠️ Legacy (`variable`) parameters and rich parameters can't be used in the same template.
+1. Enable the `feature_use_managed_variables` provider flag.
+2. Ensure that every legacy variable block has defined missing default values, or convert it to `coder_parameter`.
+3. Push the new template version using UI or CLI.
+4. Update unsupported workspaces to the newest template version.
+5. Delete the affected workspaces that have been updated to the newest template version.
 
 ### Migration
 
-Terraform variables shouldn't be used for workspace scoped parameters anymore, and it's recommended to convert variables to `coder_parameter` resources. To make the migration smoother, there is a special property introduced -
+> ⚠️ Migration is available until v0.24.0 (Jun 2023) release.
+
+Terraform `variable` shouldn't be used for workspace scoped parameters anymore, and it's required to convert `variable` to `coder_parameter` resources. To make the migration smoother, there is a special property introduced -
 `legacy_variable` and `legacy_variable_name` , which can link `coder_parameter` with a legacy variable.
 
 ```hcl
@@ -264,12 +267,14 @@ data "coder_parameter" "cpu" {
 
 As a template improvement, the template author can consider making some of the new `coder_parameter` resources `mutable`.
 
-## Managed Terraform variables
+## Terraform template-wide variables
+
+> ⚠️ Flag `feature_use_managed_variables` is available until v0.25.0 (Jul 2023) release. After this release, template-wide Terraform variables will be enabled by default.
 
 As parameters are intended to be used only for workspace customization purposes, Terraform variables can be freely managed by the template author to build templates. Workspace users are not able to modify
 template variables.
 
-The template author can enable managed Terraform variables mode by specifying the following flag:
+The template author can enable Terraform template-wide variables mode by specifying the following flag:
 
 ```hcl
 provider "coder" {

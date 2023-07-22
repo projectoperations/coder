@@ -45,7 +45,9 @@ const (
 // sshConfigOptions represents options that can be stored and read
 // from the coder config in ~/.ssh/coder.
 type sshConfigOptions struct {
-	sshOptions []string
+	waitEnum       string
+	userHostPrefix string
+	sshOptions     []string
 }
 
 // addOptions expects options in the form of "option=value" or "option value".
@@ -100,10 +102,19 @@ func (o sshConfigOptions) equal(other sshConfigOptions) bool {
 	sort.Strings(opt1)
 	opt2 := slices.Clone(other.sshOptions)
 	sort.Strings(opt2)
-	return slices.Equal(opt1, opt2)
+	if !slices.Equal(opt1, opt2) {
+		return false
+	}
+	return o.waitEnum == other.waitEnum && o.userHostPrefix == other.userHostPrefix
 }
 
 func (o sshConfigOptions) asList() (list []string) {
+	if o.waitEnum != "auto" {
+		list = append(list, fmt.Sprintf("wait: %s", o.waitEnum))
+	}
+	if o.userHostPrefix != "" {
+		list = append(list, fmt.Sprintf("ssh-host-prefix: %s", o.userHostPrefix))
+	}
 	for _, opt := range o.sshOptions {
 		list = append(list, fmt.Sprintf("ssh-option: %s", opt))
 	}
@@ -178,14 +189,16 @@ func sshPrepareWorkspaceConfigs(ctx context.Context, client *codersdk.Client) (r
 	}
 }
 
+//nolint:gocyclo
 func (r *RootCmd) configSSH() *clibase.Cmd {
 	var (
-		sshConfigFile    string
-		sshConfigOpts    sshConfigOptions
-		usePreviousOpts  bool
-		dryRun           bool
-		skipProxyCommand bool
-		userHostPrefix   string
+		sshConfigFile       string
+		sshConfigOpts       sshConfigOptions
+		usePreviousOpts     bool
+		dryRun              bool
+		skipProxyCommand    bool
+		forceUnixSeparators bool
+		coderCliPath        string
 	)
 	client := new(codersdk.Client)
 	cmd := &clibase.Cmd{
@@ -207,6 +220,12 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 			r.InitClient(client),
 		),
 		Handler: func(inv *clibase.Invocation) error {
+			if sshConfigOpts.waitEnum != "auto" && skipProxyCommand {
+				// The wait option is applied to the ProxyCommand. If the user
+				// specifies skip-proxy-command, then wait cannot be applied.
+				return xerrors.Errorf("cannot specify both --skip-proxy-command and --wait")
+			}
+
 			recvWorkspaceConfigs := sshPrepareWorkspaceConfigs(inv.Context(), client)
 
 			out := inv.Stdout
@@ -215,17 +234,23 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 				// that it's possible to capture the diff.
 				out = inv.Stderr
 			}
-			coderBinary, err := currentBinPath(out)
-			if err != nil {
-				return err
+
+			var err error
+			coderBinary := coderCliPath
+			if coderBinary == "" {
+				coderBinary, err = currentBinPath(out)
+				if err != nil {
+					return err
+				}
 			}
-			escapedCoderBinary, err := sshConfigExecEscape(coderBinary)
+
+			escapedCoderBinary, err := sshConfigExecEscape(coderBinary, forceUnixSeparators)
 			if err != nil {
 				return xerrors.Errorf("escape coder binary for ssh failed: %w", err)
 			}
 
 			root := r.createConfig()
-			escapedGlobalConfig, err := sshConfigExecEscape(string(root))
+			escapedGlobalConfig, err := sshConfigExecEscape(string(root), forceUnixSeparators)
 			if err != nil {
 				return xerrors.Errorf("escape global config for ssh failed: %w", err)
 			}
@@ -295,7 +320,7 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 					// Selecting "no" will use the last config.
 					sshConfigOpts = *lastConfig
 				} else {
-					changes = append(changes, "Use new SSH options")
+					changes = append(changes, "Use new options")
 				}
 				// Only print when prompts are shown.
 				if yes, _ := inv.ParsedFlags().GetBool("yes"); !yes {
@@ -336,9 +361,9 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 				coderdConfig.HostnamePrefix = "coder."
 			}
 
-			if userHostPrefix != "" {
+			if sshConfigOpts.userHostPrefix != "" {
 				// Override with user flag.
-				coderdConfig.HostnamePrefix = userHostPrefix
+				coderdConfig.HostnamePrefix = sshConfigOpts.userHostPrefix
 			}
 
 			// Ensure stable sorting of output.
@@ -363,13 +388,20 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 					}
 
 					if !skipProxyCommand {
+						flags := ""
+						if sshConfigOpts.waitEnum != "auto" {
+							flags += " --wait=" + sshConfigOpts.waitEnum
+						}
 						defaultOptions = append(defaultOptions, fmt.Sprintf(
-							"ProxyCommand %s --global-config %s ssh --stdio %s",
-							escapedCoderBinary, escapedGlobalConfig, workspaceHostname,
+							"ProxyCommand %s --global-config %s ssh --stdio%s %s",
+							escapedCoderBinary, escapedGlobalConfig, flags, workspaceHostname,
 						))
 					}
 
-					var configOptions sshConfigOptions
+					// Create a copy of the options so we can modify them.
+					configOptions := sshConfigOpts
+					configOptions.sshOptions = nil
+
 					// Add standard options.
 					err := configOptions.addOptions(defaultOptions...)
 					if err != nil {
@@ -477,6 +509,24 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 			Value:       clibase.StringOf(&sshConfigFile),
 		},
 		{
+			Flag:    "coder-binary-path",
+			Env:     "CODER_SSH_CONFIG_BINARY_PATH",
+			Default: "",
+			Description: "Optionally specify the absolute path to the coder binary used in ProxyCommand. " +
+				"By default, the binary invoking this command ('config ssh') is used.",
+			Value: clibase.Validate(clibase.StringOf(&coderCliPath), func(value *clibase.String) error {
+				if runtime.GOOS == goosWindows {
+					// For some reason filepath.IsAbs() does not work on windows.
+					return nil
+				}
+				absolute := filepath.IsAbs(value.String())
+				if !absolute {
+					return xerrors.Errorf("coder cli path must be an absolute path")
+				}
+				return nil
+			}),
+		},
+		{
 			Flag:          "ssh-option",
 			FlagShorthand: "o",
 			Env:           "CODER_SSH_CONFIG_OPTS",
@@ -505,9 +555,29 @@ func (r *RootCmd) configSSH() *clibase.Cmd {
 		},
 		{
 			Flag:        "ssh-host-prefix",
-			Env:         "",
+			Env:         "CODER_CONFIGSSH_SSH_HOST_PREFIX",
 			Description: "Override the default host prefix.",
-			Value:       clibase.StringOf(&userHostPrefix),
+			Value:       clibase.StringOf(&sshConfigOpts.userHostPrefix),
+		},
+		{
+			Flag:        "wait",
+			Env:         "CODER_CONFIGSSH_WAIT", // Not to be mixed with CODER_SSH_WAIT.
+			Description: "Specifies whether or not to wait for the startup script to finish executing. Auto means that the agent startup script behavior configured in the workspace template is used.",
+			Default:     "auto",
+			Value:       clibase.EnumOf(&sshConfigOpts.waitEnum, "yes", "no", "auto"),
+		},
+		{
+			Flag: "force-unix-filepaths",
+			Env:  "CODER_CONFIGSSH_UNIX_FILEPATHS",
+			Description: "By default, 'config-ssh' uses the os path separator when writing the ssh config. " +
+				"This might be an issue in Windows machine that use a unix-like shell. " +
+				"This flag forces the use of unix file paths (the forward slash '/').",
+			Value: clibase.BoolOf(&forceUnixSeparators),
+			// On non-windows showing this command is useless because it is a noop.
+			// Hide vs disable it though so if a command is copied from a Windows
+			// machine to a unix machine it will still work and not throw an
+			// "unknown flag" error.
+			Hidden: hideForceUnixSlashes,
 		},
 		cliui.SkipPromptOption(),
 	}
@@ -524,12 +594,22 @@ func sshConfigWriteSectionHeader(w io.Writer, addNewline bool, o sshConfigOption
 	_, _ = fmt.Fprint(w, nl+sshStartToken+"\n")
 	_, _ = fmt.Fprint(w, sshConfigSectionHeader)
 	_, _ = fmt.Fprint(w, sshConfigDocsHeader)
-	if len(o.sshOptions) > 0 {
-		_, _ = fmt.Fprint(w, sshConfigOptionsHeader)
-		for _, opt := range o.sshOptions {
-			_, _ = fmt.Fprintf(w, "# :%s=%s\n", "ssh-option", opt)
-		}
+
+	var ow strings.Builder
+	if o.waitEnum != "auto" {
+		_, _ = fmt.Fprintf(&ow, "# :%s=%s\n", "wait", o.waitEnum)
 	}
+	if o.userHostPrefix != "" {
+		_, _ = fmt.Fprintf(&ow, "# :%s=%s\n", "ssh-host-prefix", o.userHostPrefix)
+	}
+	for _, opt := range o.sshOptions {
+		_, _ = fmt.Fprintf(&ow, "# :%s=%s\n", "ssh-option", opt)
+	}
+	if ow.Len() > 0 {
+		_, _ = fmt.Fprint(w, sshConfigOptionsHeader)
+		_, _ = fmt.Fprint(w, ow.String())
+	}
+
 	_, _ = fmt.Fprint(w, "#\n")
 }
 
@@ -538,6 +618,9 @@ func sshConfigWriteSectionEnd(w io.Writer) {
 }
 
 func sshConfigParseLastOptions(r io.Reader) (o sshConfigOptions) {
+	// Default values.
+	o.waitEnum = "auto"
+
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		line := s.Text()
@@ -545,6 +628,10 @@ func sshConfigParseLastOptions(r io.Reader) (o sshConfigOptions) {
 			line = strings.TrimPrefix(line, "# :")
 			parts := strings.SplitN(line, "=", 2)
 			switch parts[0] {
+			case "wait":
+				o.waitEnum = parts[1]
+			case "ssh-host-prefix":
+				o.userHostPrefix = parts[1]
 			case "ssh-option":
 				o.sshOptions = append(o.sshOptions, parts[1])
 			default:
@@ -679,7 +766,31 @@ func writeWithTempFileAndMove(path string, r io.Reader) (err error) {
 //   - https://github.com/openssh/openssh-portable/blob/V_9_0_P1/sshconnect.c#L158-L167
 //   - https://github.com/PowerShell/openssh-portable/blob/v8.1.0.0/sshconnect.c#L231-L293
 //   - https://github.com/PowerShell/openssh-portable/blob/v8.1.0.0/contrib/win32/win32compat/w32fd.c#L1075-L1100
-func sshConfigExecEscape(path string) (string, error) {
+//
+// Additional Windows-specific notes:
+//
+// In some situations a Windows user could be using a unix-like shell such as
+// git bash. In these situations the coder.exe is using the windows filepath
+// separator (\), but the shell wants the unix filepath separator (/).
+// Trying to determine if the shell is unix-like is difficult, so this function
+// takes the argument 'forceUnixPath' to force the filepath to be unix-like.
+//
+// On actual unix machines, this is **always** a noop. Even if a windows
+// path is provided.
+//
+// Passing a "false" for forceUnixPath will result in the filepath separator
+// untouched from the original input.
+// ---
+// This is a control flag, and that is ok. It is a control flag
+// based on the OS of the user. Making this a different file is excessive.
+// nolint:revive
+func sshConfigExecEscape(path string, forceUnixPath bool) (string, error) {
+	if forceUnixPath {
+		// This is a workaround for #7639, where the filepath separator is
+		// incorrectly the Windows separator (\) instead of the unix separator (/).
+		path = filepath.ToSlash(path)
+	}
+
 	// This is unlikely to ever happen, but newlines are allowed on
 	// certain filesystems, but cannot be used inside ssh config.
 	if strings.ContainsAny(path, "\n") {

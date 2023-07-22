@@ -17,12 +17,9 @@ import { useLocalStorage } from "hooks"
 import difference from "lodash/difference"
 import { ImpendingDeletionBanner, Count } from "components/WorkspaceDeletion"
 import { ErrorAlert } from "components/Alert/ErrorAlert"
-import { Filter } from "./filter/filter"
+import { WorkspacesFilter } from "./filter/filter"
 import { hasError, isApiValidationError } from "api/errors"
-import { workspaceFilterQuery } from "utils/filters"
-import { SearchBarWithFilter } from "components/SearchBarWithFilter/SearchBarWithFilter"
-import Box from "@mui/material/Box"
-import Skeleton from "@mui/material/Skeleton"
+import { PaginationStatus } from "components/PaginationStatus/PaginationStatus"
 
 export const Language = {
   pageTitle: "Workspaces",
@@ -33,27 +30,13 @@ export const Language = {
   template: "Template",
 }
 
-const presetFilters = [
-  { query: workspaceFilterQuery.me, name: Language.yourWorkspacesButton },
-  { query: workspaceFilterQuery.all, name: Language.allWorkspacesButton },
-  {
-    query: workspaceFilterQuery.running,
-    name: Language.runningWorkspacesButton,
-  },
-  {
-    query: workspaceFilterQuery.failed,
-    name: "Failed workspaces",
-  },
-]
-
 export interface WorkspacesPageViewProps {
   error: unknown
   workspaces?: Workspace[]
   count?: number
-  useNewFilter?: boolean
+  filterProps: ComponentProps<typeof WorkspacesFilter>
   page: number
   limit: number
-  filterProps: ComponentProps<typeof Filter>
   onPageChange: (page: number) => void
   onUpdateWorkspace: (workspace: Workspace) => void
 }
@@ -68,7 +51,6 @@ export const WorkspacesPageView: FC<
   filterProps,
   onPageChange,
   onUpdateWorkspace,
-  useNewFilter,
   page,
 }) => {
   const { saveLocal, getLocal } = useLocalStorage()
@@ -134,45 +116,19 @@ export const WorkspacesPageView: FC<
           count={Count.Multiple}
         />
 
-        {useNewFilter ? (
-          <Filter error={error} {...filterProps} />
-        ) : (
-          <SearchBarWithFilter
-            filter={filterProps.filter.query}
-            onFilter={filterProps.filter.debounceUpdate}
-            presetFilters={presetFilters}
-            error={error}
-          />
-        )}
+        <WorkspacesFilter error={error} {...filterProps} />
       </Stack>
 
-      <Box
-        sx={{
-          fontSize: 13,
-          mb: 2,
-          mt: 1,
-          color: (theme) => theme.palette.text.secondary,
-          "& strong": { color: (theme) => theme.palette.text.primary },
-        }}
-      >
-        {workspaces ? (
-          <>
-            Showing <strong>{workspaces?.length}</strong> of{" "}
-            <strong>{count}</strong> workspaces
-          </>
-        ) : (
-          <Box sx={{ height: 24, display: "flex", alignItems: "center" }}>
-            <Skeleton variant="text" width={160} height={16} />
-          </Box>
-        )}
-      </Box>
+      <PaginationStatus
+        isLoading={!workspaces && !error}
+        showing={workspaces?.length ?? 0}
+        total={count ?? 0}
+        label="workspaces"
+      />
 
       <WorkspacesTable
         workspaces={workspaces}
-        isUsingFilter={
-          filterProps.filter.query !== "" &&
-          filterProps.filter.query !== workspaceFilterQuery.me
-        }
+        isUsingFilter={filterProps.filter.used}
         onUpdateWorkspace={onUpdateWorkspace}
         error={error}
       />

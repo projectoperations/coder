@@ -1,8 +1,10 @@
 // Based on https://github.com/gera2ld/tarjs
 // and https://github.com/ankitrohatgi/tarballjs/blob/master/tarball.js
-export enum TarFileType {
-  File = "0",
-  Dir = "5",
+type TarFileType = string
+// Added the most common codes
+export const TarFileTypeCodes = {
+  File: "0",
+  Dir: "5",
 }
 const encoder = new TextEncoder()
 const utf8Encode = (input: string) => encoder.encode(input)
@@ -131,13 +133,7 @@ export class TarReader {
   private readFileType(offset: number) {
     const typeView = new Uint8Array(this.buffer, offset + 156, 1)
     const typeStr = String.fromCharCode(typeView[0])
-    if (typeStr === "0") {
-      return TarFileType.File
-    } else if (typeStr === "5") {
-      return TarFileType.Dir
-    } else {
-      throw new Error("No supported file type")
-    }
+    return typeStr
   }
 
   private readFileSize(offset: number) {
@@ -192,7 +188,7 @@ export class TarWriter {
     const size = (data as ArrayBuffer).byteLength ?? (file as Blob).size
     const item: ITarWriteItem = {
       name,
-      type: TarFileType.File,
+      type: TarFileTypeCodes.File,
       data,
       size,
       opts,
@@ -203,7 +199,7 @@ export class TarWriter {
   addFolder(name: string, opts?: Partial<ITarWriteOptions>) {
     this.fileData.push({
       name,
-      type: TarFileType.Dir,
+      type: TarFileTypeCodes.Dir,
       data: null,
       size: 0,
       opts,
@@ -236,7 +232,12 @@ export class TarWriter {
       view.set(data, offset + 512)
       offset += 512 + 512 * Math.floor((item.size + 511) / 512)
     }
-    return new Blob([this.buffer], { type: "application/x-tar" })
+    // Required so it works in the browser and node.
+    if (typeof Blob !== "undefined") {
+      return new Blob([this.buffer], { type: "application/x-tar" })
+    } else {
+      return this.buffer
+    }
   }
 
   private writeString(str: string, offset: number, size: number) {
@@ -315,7 +316,7 @@ export class TarWriter {
     const { uid, gid, mode, mtime, user, group } = {
       uid: 1000,
       gid: 1000,
-      mode: fileType === TarFileType.File ? 0o664 : 0o775,
+      mode: fileType === TarFileTypeCodes.File ? 0o664 : 0o775,
       mtime: ~~(Date.now() / 1000),
       user: "tarballjs",
       group: "tarballjs",

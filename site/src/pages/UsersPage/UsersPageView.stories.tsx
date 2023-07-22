@@ -1,4 +1,4 @@
-import { ComponentMeta, Story } from "@storybook/react"
+import { Meta, StoryObj } from "@storybook/react"
 import { createPaginationRef } from "components/PaginationWidget/utils"
 import {
   MockUser,
@@ -6,9 +6,23 @@ import {
   MockAssignableSiteRoles,
   mockApiError,
 } from "testHelpers/entities"
-import { UsersPageView, UsersPageViewProps } from "./UsersPageView"
+import { UsersPageView } from "./UsersPageView"
+import { ComponentProps } from "react"
+import { MockMenu, getDefaultFilterProps } from "components/Filter/storyHelpers"
 
-export default {
+type FilterProps = ComponentProps<typeof UsersPageView>["filterProps"]
+
+const defaultFilterProps = getDefaultFilterProps<FilterProps>({
+  query: "owner:me",
+  menus: {
+    status: MockMenu,
+  },
+  values: {
+    status: "active",
+  },
+})
+
+const meta: Meta<typeof UsersPageView> = {
   title: "pages/UsersPageView",
   component: UsersPageView,
   args: {
@@ -16,40 +30,54 @@ export default {
     isNonInitialPage: false,
     users: [MockUser, MockUser2],
     roles: MockAssignableSiteRoles,
+    count: 2,
     canEditUsers: true,
+    filterProps: defaultFilterProps,
   },
-} as ComponentMeta<typeof UsersPageView>
-
-const Template: Story<UsersPageViewProps> = (args) => (
-  <UsersPageView {...args} />
-)
-
-export const Admin = Template.bind({})
-
-export const SmallViewport = Template.bind({})
-SmallViewport.parameters = {
-  chromatic: { viewports: [600] },
 }
 
-export const Member = Template.bind({})
-Member.args = { canEditUsers: false }
+export default meta
+type Story = StoryObj<typeof UsersPageView>
 
-export const Empty = Template.bind({})
-Empty.args = { users: [] }
+export const Admin: Story = {}
 
-export const EmptyPage = Template.bind({})
-EmptyPage.args = { users: [], isNonInitialPage: true }
+export const SmallViewport = {
+  parameters: {
+    chromatic: { viewports: [600] },
+  },
+}
 
-export const Error = Template.bind({})
-Error.args = {
-  users: undefined,
-  error: mockApiError({
-    message: "Invalid user search query.",
-    validations: [
-      {
-        field: "status",
-        detail: `Query param "status" has invalid value: "inactive" is not a valid user status`,
-      },
-    ],
-  }),
+export const Member = {
+  args: { canEditUsers: false },
+}
+
+export const Empty = {
+  args: { users: [], count: 0 },
+}
+
+export const EmptyPage = {
+  args: {
+    users: [],
+    count: 0,
+    isNonInitialPage: true,
+  },
+}
+
+export const Error = {
+  args: {
+    users: undefined,
+    count: 0,
+    filterProps: {
+      ...defaultFilterProps,
+      error: mockApiError({
+        message: "Invalid user search query.",
+        validations: [
+          {
+            field: "status",
+            detail: `Query param "status" has invalid value: "inactive" is not a valid user status`,
+          },
+        ],
+      }),
+    },
+  },
 }

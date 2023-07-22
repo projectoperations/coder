@@ -22,6 +22,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom"
 import { Paywall } from "components/Paywall/Paywall"
 import { Group } from "api/typesGenerated"
 import { GroupAvatar } from "components/GroupAvatar/GroupAvatar"
+import { docs } from "utils/docs"
 
 export type GroupsPageViewProps = {
   groups: Group[] | undefined
@@ -44,22 +45,22 @@ export const GroupsPageView: FC<GroupsPageViewProps> = ({
       <ChooseOne>
         <Cond condition={!isTemplateRBACEnabled}>
           <Paywall
-            message="User groups"
-            description="Organize the users into groups and manage their permissions. To use this feature, you have to upgrade your account."
+            message="Groups"
+            description="Organize users into groups with restricted access to templates. You need an Enterprise license to use this feature."
             cta={
               <Stack direction="row" alignItems="center">
                 <Button
-                  href="https://coder.com/docs/coder-oss/latest/enterprise"
+                  href={docs("/enterprise")}
                   target="_blank"
                   rel="noreferrer"
                   startIcon={<ArrowRightAltOutlined />}
                   variant="contained"
                 >
-                  See how to upgrade
+                  Learn about Enterprise
                 </Button>
 
                 <Link
-                  href="https://coder.com/docs/coder-oss/latest/admin/groups"
+                  href={docs("/admin/groups")}
                   target="_blank"
                   rel="noreferrer"
                 >

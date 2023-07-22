@@ -28,6 +28,7 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 		provisionerTags []string
 		variablesFile   string
 		variables       []string
+		disableEveryone bool
 		defaultTTL      time.Duration
 		failureTTL      time.Duration
 		inactivityTTL   time.Duration
@@ -86,6 +87,13 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 				return xerrors.Errorf("A template already exists named %q!", templateName)
 			}
 
+			err = uploadFlags.checkForLockfile(inv)
+			if err != nil {
+				return xerrors.Errorf("check for lockfile: %w", err)
+			}
+
+			message := uploadFlags.templateMessage(inv)
+
 			// Confirm upload of the directory.
 			resp, err := uploadFlags.upload(inv, client)
 			if err != nil {
@@ -98,6 +106,7 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 			}
 
 			job, err := createValidTemplateVersion(inv, createValidTemplateVersionArgs{
+				Message:         message,
 				Client:          client,
 				Organization:    organization,
 				Provisioner:     database.ProvisionerType(provisioner),
@@ -121,11 +130,12 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 			}
 
 			createReq := codersdk.CreateTemplateRequest{
-				Name:                templateName,
-				VersionID:           job.ID,
-				DefaultTTLMillis:    ptr.Ref(defaultTTL.Milliseconds()),
-				FailureTTLMillis:    ptr.Ref(failureTTL.Milliseconds()),
-				InactivityTTLMillis: ptr.Ref(inactivityTTL.Milliseconds()),
+				Name:                       templateName,
+				VersionID:                  job.ID,
+				DefaultTTLMillis:           ptr.Ref(defaultTTL.Milliseconds()),
+				FailureTTLMillis:           ptr.Ref(failureTTL.Milliseconds()),
+				InactivityTTLMillis:        ptr.Ref(inactivityTTL.Milliseconds()),
+				DisableEveryoneGroupAccess: disableEveryone,
 			}
 
 			_, err = client.CreateTemplate(inv.Context(), organization.ID, createReq)
@@ -133,17 +143,23 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 				return err
 			}
 
-			_, _ = fmt.Fprintln(inv.Stdout, "\n"+cliui.Styles.Wrap.Render(
-				"The "+cliui.Styles.Keyword.Render(templateName)+" template has been created at "+cliui.Styles.DateTimeStamp.Render(time.Now().Format(time.Stamp))+"! "+
+			_, _ = fmt.Fprintln(inv.Stdout, "\n"+cliui.DefaultStyles.Wrap.Render(
+				"The "+cliui.DefaultStyles.Keyword.Render(templateName)+" template has been created at "+cliui.DefaultStyles.DateTimeStamp.Render(time.Now().Format(time.Stamp))+"! "+
 					"Developers can provision a workspace with this template using:")+"\n")
 
-			_, _ = fmt.Fprintln(inv.Stdout, "  "+cliui.Styles.Code.Render(fmt.Sprintf("coder create --template=%q [workspace name]", templateName)))
+			_, _ = fmt.Fprintln(inv.Stdout, "  "+cliui.DefaultStyles.Code.Render(fmt.Sprintf("coder create --template=%q [workspace name]", templateName)))
 			_, _ = fmt.Fprintln(inv.Stdout)
 
 			return nil
 		},
 	}
 	cmd.Options = clibase.OptionSet{
+		{
+			Flag: "private",
+			Description: "Disable the default behavior of granting template access to the 'everyone' group. " +
+				"The template permissions must be updated to allow non-admin users to use this template.",
+			Value: clibase.BoolOf(&disableEveryone),
+		},
 		{
 			Flag:        "variables-file",
 			Description: "Specify a file path with values for Terraform-managed variables.",
@@ -177,7 +193,6 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 			Default:     "0h",
 			Value:       clibase.DurationOf(&inactivityTTL),
 		},
-		uploadFlags.option(),
 		{
 			Flag:        "test.provisioner",
 			Description: "Customize the provisioner backend.",
@@ -187,11 +202,13 @@ func (r *RootCmd) templateCreate() *clibase.Cmd {
 		},
 		cliui.SkipPromptOption(),
 	}
+	cmd.Options = append(cmd.Options, uploadFlags.options()...)
 	return cmd
 }
 
 type createValidTemplateVersionArgs struct {
 	Name         string
+	Message      string
 	Client       *codersdk.Client
 	Organization codersdk.Organization
 	Provisioner  database.ProvisionerType
@@ -225,6 +242,7 @@ func createValidTemplateVersion(inv *clibase.Invocation, args createValidTemplat
 
 	req := codersdk.CreateTemplateVersionRequest{
 		Name:               args.Name,
+		Message:            args.Message,
 		StorageMethod:      codersdk.ProvisionerStorageMethodFile,
 		FileID:             args.FileID,
 		Provisioner:        codersdk.ProvisionerType(args.Provisioner),

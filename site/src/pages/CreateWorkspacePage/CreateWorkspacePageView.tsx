@@ -28,6 +28,7 @@ import {
   MutableTemplateParametersSection,
 } from "components/TemplateParameters/TemplateParameters"
 import { ErrorAlert } from "components/Alert/ErrorAlert"
+import { paramUsedToCreateWorkspace } from "utils/workspace"
 
 export enum CreateWorkspaceErrors {
   GET_TEMPLATES_ERROR = "getTemplatesError",
@@ -59,8 +60,11 @@ export interface CreateWorkspacePageViewProps {
 export const CreateWorkspacePageView: FC<
   React.PropsWithChildren<CreateWorkspacePageViewProps>
 > = (props) => {
+  const templateParameters = props.templateParameters?.filter(
+    paramUsedToCreateWorkspace,
+  )
   const initialRichParameterValues = selectInitialRichParametersValues(
-    props.templateParameters,
+    templateParameters,
     props.defaultParameterValues,
   )
   const [gitAuthErrors, setGitAuthErrors] = useState<Record<string, string>>({})
@@ -72,20 +76,16 @@ export const CreateWorkspacePageView: FC<
     // to disappear.
     setGitAuthErrors({})
   }, [props.templateGitAuth])
-
   const workspaceErrors =
     props.createWorkspaceErrors[CreateWorkspaceErrors.CREATE_WORKSPACE_ERROR]
-
   // Scroll to top of page if errors are present
   useEffect(() => {
     if (props.hasTemplateErrors || Boolean(workspaceErrors)) {
       window.scrollTo(0, 0)
     }
   }, [props.hasTemplateErrors, workspaceErrors])
-
   const { t } = useTranslation("createWorkspacePage")
   const styles = useStyles()
-
   const form: FormikContextType<TypesGen.CreateWorkspaceRequest> =
     useFormik<TypesGen.CreateWorkspaceRequest>({
       initialValues: {
@@ -97,7 +97,7 @@ export const CreateWorkspacePageView: FC<
         name: nameValidator(t("nameLabel", { ns: "createWorkspacePage" })),
         rich_parameter_values: useValidationSchemaForRichParameters(
           "createWorkspacePage",
-          props.templateParameters,
+          templateParameters,
         ),
       }),
       enableReinitialize: true,
@@ -184,7 +184,7 @@ export const CreateWorkspacePageView: FC<
 
         {/* General info */}
         <FormSection
-          title="General info"
+          title="General"
           description="The template and name of your new workspace."
         >
           <FormFields>
@@ -206,14 +206,14 @@ export const CreateWorkspacePageView: FC<
         {/* Workspace owner */}
         {props.canCreateForUser && (
           <FormSection
-            title="Workspace owner"
-            description="The user that is going to own this workspace. If you are admin, you can create workspace for others."
+            title="Workspace Owner"
+            description="Only admins can create workspace for other users."
           >
             <FormFields>
               <UserAutocomplete
                 value={props.owner}
                 onChange={props.setOwner}
-                label={t("ownerLabel")}
+                label={t("ownerLabel").toString()}
                 size="medium"
               />
             </FormFields>
@@ -240,17 +240,17 @@ export const CreateWorkspacePageView: FC<
           </FormSection>
         )}
 
-        {props.templateParameters && (
+        {templateParameters && (
           <>
             <MutableTemplateParametersSection
-              templateParameters={props.templateParameters}
+              templateParameters={templateParameters}
               getInputProps={(parameter, index) => {
                 return {
                   ...getFieldHelpers(
                     "rich_parameter_values[" + index + "].value",
                   ),
-                  onChange: (value) => {
-                    form.setFieldValue("rich_parameter_values." + index, {
+                  onChange: async (value) => {
+                    await form.setFieldValue("rich_parameter_values." + index, {
                       name: parameter.name,
                       value: value,
                     })
@@ -264,15 +264,15 @@ export const CreateWorkspacePageView: FC<
               }}
             />
             <ImmutableTemplateParametersSection
-              templateParameters={props.templateParameters}
+              templateParameters={templateParameters}
               classes={{ root: styles.warningSection }}
               getInputProps={(parameter, index) => {
                 return {
                   ...getFieldHelpers(
                     "rich_parameter_values[" + index + "].value",
                   ),
-                  onChange: (value) => {
-                    form.setFieldValue("rich_parameter_values." + index, {
+                  onChange: async (value) => {
+                    await form.setFieldValue("rich_parameter_values." + index, {
                       name: parameter.name,
                       value: value,
                     })
@@ -291,7 +291,7 @@ export const CreateWorkspacePageView: FC<
         <FormFooter
           onCancel={props.onCancel}
           isLoading={props.creatingWorkspace}
-          submitLabel={t("createWorkspace")}
+          submitLabel={t("createWorkspace").toString()}
         />
       </HorizontalForm>
     </FullPageHorizontalForm>
