@@ -12,18 +12,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog"
 
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/coderd/database/db2sdk"
-	"github.com/coder/coder/coderd/database/dbauthz"
-	"github.com/coder/coder/coderd/httpapi"
-	"github.com/coder/coder/coderd/httpmw"
-	"github.com/coder/coder/coderd/rbac"
-	"github.com/coder/coder/coderd/wsbuilder"
-	"github.com/coder/coder/codersdk"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/db2sdk"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/provisionerjobs"
+	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/wsbuilder"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // @Summary Get workspace build
@@ -75,6 +78,8 @@ func (api *API) workspaceBuild(rw http.ResponseWriter, r *http.Request) {
 		data.metadata,
 		data.agents,
 		data.apps,
+		data.scripts,
+		data.logSources,
 		data.templateVersions[0],
 	)
 	if err != nil {
@@ -151,7 +156,7 @@ func (api *API) workspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 			AfterID:     paginationParams.AfterID,
 			OffsetOpt:   int32(paginationParams.Offset),
 			LimitOpt:    int32(paginationParams.Limit),
-			Since:       database.Time(since),
+			Since:       dbtime.Time(since),
 		}
 		workspaceBuilds, err = store.GetWorkspaceBuildsByWorkspaceID(ctx, req)
 		if xerrors.Is(err, sql.ErrNoRows) {
@@ -189,6 +194,8 @@ func (api *API) workspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 		data.metadata,
 		data.agents,
 		data.apps,
+		data.scripts,
+		data.logSources,
 		data.templateVersions,
 	)
 	if err != nil {
@@ -277,6 +284,8 @@ func (api *API) workspaceBuildByBuildNumber(rw http.ResponseWriter, r *http.Requ
 		data.metadata,
 		data.agents,
 		data.apps,
+		data.scripts,
+		data.logSources,
 		data.templateVersions[0],
 	)
 	if err != nil {
@@ -303,7 +312,6 @@ func (api *API) workspaceBuildByBuildNumber(rw http.ResponseWriter, r *http.Requ
 // @Param request body codersdk.CreateWorkspaceBuildRequest true "Create workspace build request"
 // @Success 200 {object} codersdk.WorkspaceBuild
 // @Router /workspaces/{workspace}/builds [post]
-// nolint:gocyclo
 func (api *API) postWorkspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	apiKey := httpmw.APIKey(r)
@@ -373,6 +381,11 @@ func (api *API) postWorkspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	err = provisionerjobs.PostJob(api.Pubsub, *provisionerJob)
+	if err != nil {
+		// Client probably doesn't care about this error, so just log it.
+		api.Logger.Error(ctx, "failed to post provisioner job to pubsub", slog.Error(err))
+	}
 
 	users, err := api.Database.GetUsersByIDs(ctx, []uuid.UUID{
 		workspace.OwnerID,
@@ -398,6 +411,8 @@ func (api *API) postWorkspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 		[]database.WorkspaceResourceMetadatum{},
 		[]database.WorkspaceAgent{},
 		[]database.WorkspaceApp{},
+		[]database.WorkspaceAgentScript{},
+		[]database.WorkspaceAgentLogSource{},
 		database.TemplateVersion{},
 	)
 	if err != nil {
@@ -470,11 +485,11 @@ func (api *API) patchCancelWorkspaceBuild(rw http.ResponseWriter, r *http.Reques
 	err = api.Database.UpdateProvisionerJobWithCancelByID(ctx, database.UpdateProvisionerJobWithCancelByIDParams{
 		ID: job.ID,
 		CanceledAt: sql.NullTime{
-			Time:  database.Now(),
+			Time:  dbtime.Now(),
 			Valid: true,
 		},
 		CompletedAt: sql.NullTime{
-			Time: database.Now(),
+			Time: dbtime.Now(),
 			// If the job is running, don't mark it completed!
 			Valid: !job.WorkerID.Valid,
 		},
@@ -631,13 +646,12 @@ type workspaceBuildsData struct {
 	metadata         []database.WorkspaceResourceMetadatum
 	agents           []database.WorkspaceAgent
 	apps             []database.WorkspaceApp
+	scripts          []database.WorkspaceAgentScript
+	logSources       []database.WorkspaceAgentLogSource
 }
 
 func (api *API) workspaceBuildsData(ctx context.Context, workspaces []database.Workspace, workspaceBuilds []database.WorkspaceBuild) (workspaceBuildsData, error) {
 	userIDs := make([]uuid.UUID, 0, len(workspaceBuilds))
-	for _, build := range workspaceBuilds {
-		userIDs = append(userIDs, build.InitiatorID)
-	}
 	for _, workspace := range workspaces {
 		userIDs = append(userIDs, workspace.OwnerID)
 	}
@@ -712,10 +726,31 @@ func (api *API) workspaceBuildsData(ctx context.Context, workspaces []database.W
 		agentIDs = append(agentIDs, agent.ID)
 	}
 
-	// nolint:gocritic // Getting workspace apps by agent IDs is a system function.
-	apps, err := api.Database.GetWorkspaceAppsByAgentIDs(dbauthz.AsSystemRestricted(ctx), agentIDs)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return workspaceBuildsData{}, xerrors.Errorf("fetching workspace apps: %w", err)
+	var (
+		apps       []database.WorkspaceApp
+		scripts    []database.WorkspaceAgentScript
+		logSources []database.WorkspaceAgentLogSource
+	)
+
+	var eg errgroup.Group
+	eg.Go(func() (err error) {
+		// nolint:gocritic // Getting workspace apps by agent IDs is a system function.
+		apps, err = api.Database.GetWorkspaceAppsByAgentIDs(dbauthz.AsSystemRestricted(ctx), agentIDs)
+		return err
+	})
+	eg.Go(func() (err error) {
+		// nolint:gocritic // Getting workspace scripts by agent IDs is a system function.
+		scripts, err = api.Database.GetWorkspaceAgentScriptsByAgentIDs(dbauthz.AsSystemRestricted(ctx), agentIDs)
+		return err
+	})
+	eg.Go(func() error {
+		// nolint:gocritic // Getting workspace agent log sources by agent IDs is a system function.
+		logSources, err = api.Database.GetWorkspaceAgentLogSourcesByAgentIDs(dbauthz.AsSystemRestricted(ctx), agentIDs)
+		return err
+	})
+	err = eg.Wait()
+	if err != nil {
+		return workspaceBuildsData{}, err
 	}
 
 	return workspaceBuildsData{
@@ -726,6 +761,8 @@ func (api *API) workspaceBuildsData(ctx context.Context, workspaces []database.W
 		metadata:         metadata,
 		agents:           agents,
 		apps:             apps,
+		scripts:          scripts,
+		logSources:       logSources,
 	}, nil
 }
 
@@ -738,6 +775,8 @@ func (api *API) convertWorkspaceBuilds(
 	resourceMetadata []database.WorkspaceResourceMetadatum,
 	resourceAgents []database.WorkspaceAgent,
 	agentApps []database.WorkspaceApp,
+	agentScripts []database.WorkspaceAgentScript,
+	agentLogSources []database.WorkspaceAgentLogSource,
 	templateVersions []database.TemplateVersion,
 ) ([]codersdk.WorkspaceBuild, error) {
 	workspaceByID := map[uuid.UUID]database.Workspace{}
@@ -778,6 +817,8 @@ func (api *API) convertWorkspaceBuilds(
 			resourceMetadata,
 			resourceAgents,
 			agentApps,
+			agentScripts,
+			agentLogSources,
 			templateVersion,
 		)
 		if err != nil {
@@ -799,6 +840,8 @@ func (api *API) convertWorkspaceBuild(
 	resourceMetadata []database.WorkspaceResourceMetadatum,
 	resourceAgents []database.WorkspaceAgent,
 	agentApps []database.WorkspaceApp,
+	agentScripts []database.WorkspaceAgentScript,
+	agentLogSources []database.WorkspaceAgentLogSource,
 	templateVersion database.TemplateVersion,
 ) (codersdk.WorkspaceBuild, error) {
 	userByID := map[uuid.UUID]database.User{}
@@ -821,6 +864,14 @@ func (api *API) convertWorkspaceBuild(
 	for _, app := range agentApps {
 		appsByAgentID[app.AgentID] = append(appsByAgentID[app.AgentID], app)
 	}
+	scriptsByAgentID := map[uuid.UUID][]database.WorkspaceAgentScript{}
+	for _, script := range agentScripts {
+		scriptsByAgentID[script.WorkspaceAgentID] = append(scriptsByAgentID[script.WorkspaceAgentID], script)
+	}
+	logSourcesByAgentID := map[uuid.UUID][]database.WorkspaceAgentLogSource{}
+	for _, logSource := range agentLogSources {
+		logSourcesByAgentID[logSource.WorkspaceAgentID] = append(logSourcesByAgentID[logSource.WorkspaceAgentID], logSource)
+	}
 
 	owner, exists := userByID[workspace.OwnerID]
 	if !exists {
@@ -834,8 +885,10 @@ func (api *API) convertWorkspaceBuild(
 		apiAgents := make([]codersdk.WorkspaceAgent, 0)
 		for _, agent := range agents {
 			apps := appsByAgentID[agent.ID]
+			scripts := scriptsByAgentID[agent.ID]
+			logSources := logSourcesByAgentID[agent.ID]
 			apiAgent, err := convertWorkspaceAgent(
-				api.DERPMap(), *api.TailnetCoordinator.Load(), agent, convertApps(apps), api.AgentInactiveDisconnectTimeout,
+				api.DERPMap(), *api.TailnetCoordinator.Load(), agent, convertApps(apps, agent, owner, workspace), convertScripts(scripts), convertLogSources(logSources), api.AgentInactiveDisconnectTimeout,
 				api.DeploymentValues.AgentFallbackTroubleshootingURL.String(),
 			)
 			if err != nil {

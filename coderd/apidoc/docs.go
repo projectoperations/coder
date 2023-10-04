@@ -602,6 +602,103 @@ const docTemplate = `{
                 }
             }
         },
+        "/external-auth/{externalauth}": {
+            "get": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Git"
+                ],
+                "summary": "Get external auth by ID",
+                "operationId": "get-external-auth-by-id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "string",
+                        "description": "Git Provider ID",
+                        "name": "externalauth",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ExternalAuth"
+                        }
+                    }
+                }
+            }
+        },
+        "/external-auth/{externalauth}/device": {
+            "get": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Git"
+                ],
+                "summary": "Get external auth device by ID.",
+                "operationId": "get-external-auth-device-by-id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "string",
+                        "description": "Git Provider ID",
+                        "name": "externalauth",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ExternalAuthDevice"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "tags": [
+                    "Git"
+                ],
+                "summary": "Post external auth device by ID",
+                "operationId": "post-external-auth-device-by-id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "string",
+                        "description": "External Provider ID",
+                        "name": "externalauth",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/files": {
             "post": {
                 "security": [
@@ -677,103 +774,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/gitauth/{gitauth}": {
-            "get": {
-                "security": [
-                    {
-                        "CoderSessionToken": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Git"
-                ],
-                "summary": "Get git auth by ID",
-                "operationId": "get-git-auth-by-id",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "string",
-                        "description": "Git Provider ID",
-                        "name": "gitauth",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/codersdk.GitAuth"
-                        }
-                    }
-                }
-            }
-        },
-        "/gitauth/{gitauth}/device": {
-            "get": {
-                "security": [
-                    {
-                        "CoderSessionToken": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Git"
-                ],
-                "summary": "Get git auth device by ID.",
-                "operationId": "get-git-auth-device-by-id",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "string",
-                        "description": "Git Provider ID",
-                        "name": "gitauth",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/codersdk.GitAuthDevice"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "CoderSessionToken": []
-                    }
-                ],
-                "tags": [
-                    "Git"
-                ],
-                "summary": "Post git auth device by ID",
-                "operationId": "post-git-auth-device-by-id",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "string",
-                        "description": "Git Provider ID",
-                        "name": "gitauth",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    }
-                }
-            }
-        },
         "/groups/{group}": {
             "get": {
                 "security": [
@@ -787,12 +787,12 @@ const docTemplate = `{
                 "tags": [
                     "Enterprise"
                 ],
-                "summary": "Get group by name",
-                "operationId": "get-group-by-name",
+                "summary": "Get group by ID",
+                "operationId": "get-group-by-id",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Group name",
+                        "description": "Group id",
                         "name": "group",
                         "in": "path",
                         "required": true
@@ -845,6 +845,9 @@ const docTemplate = `{
                         "CoderSessionToken": []
                     }
                 ],
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -860,6 +863,15 @@ const docTemplate = `{
                         "name": "group",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Patch group request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.PatchGroupRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -917,6 +929,31 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.TemplateInsightsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/insights/user-activity": {
+            "get": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Insights"
+                ],
+                "summary": "Get insights about user activity",
+                "operationId": "get-insights-about-user-activity",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UserActivityInsightsResponse"
                         }
                     }
                 }
@@ -1007,6 +1044,31 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/codersdk.License"
+                        }
+                    }
+                }
+            }
+        },
+        "/licenses/refresh-entitlements": {
+            "post": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Organizations"
+                ],
+                "summary": "Update license entitlements",
+                "operationId": "update-license-entitlements",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 }
@@ -2706,7 +2768,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/templateversions/{templateversion}/gitauth": {
+        "/templateversions/{templateversion}/external-auth": {
             "get": {
                 "security": [
                     {
@@ -2719,8 +2781,8 @@ const docTemplate = `{
                 "tags": [
                     "Templates"
                 ],
-                "summary": "Get git auth by template version",
-                "operationId": "get-git-auth-by-template-version",
+                "summary": "Get external auth by template version",
+                "operationId": "get-external-auth-by-template-version",
                 "parameters": [
                     {
                         "type": "string",
@@ -2737,7 +2799,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/codersdk.TemplateVersionGitAuth"
+                                "$ref": "#/definitions/codersdk.TemplateVersionExternalAuth"
                             }
                         }
                     }
@@ -5479,6 +5541,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaceproxies/me/app-stats": {
+            "post": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Enterprise"
+                ],
+                "summary": "Report workspace app stats",
+                "operationId": "report-workspace-app-stats",
+                "parameters": [
+                    {
+                        "description": "Report app stats request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/wsproxysdk.ReportAppStatsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/workspaceproxies/me/coordinate": {
             "get": {
                 "security": [
@@ -6009,6 +6107,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{workspace}/dormant": {
+            "put": {
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workspaces"
+                ],
+                "summary": "Update workspace dormancy status by id.",
+                "operationId": "update-workspace-dormancy-status-by-id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Workspace ID",
+                        "name": "workspace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Make a workspace dormant or active",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateWorkspaceDormancy"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Workspace"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{workspace}/extend": {
             "put": {
                 "security": [
@@ -6043,53 +6188,6 @@ const docTemplate = `{
                         "required": true,
                         "schema": {
                             "$ref": "#/definitions/codersdk.PutExtendWorkspaceRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/codersdk.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspaces/{workspace}/lock": {
-            "put": {
-                "security": [
-                    {
-                        "CoderSessionToken": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Workspaces"
-                ],
-                "summary": "Update workspace lock by id.",
-                "operationId": "update-workspace-lock-by-id",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "uuid",
-                        "description": "Workspace ID",
-                        "name": "workspace",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Lock or unlock a workspace",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/codersdk.UpdateWorkspaceLock"
                         }
                     }
                 ],
@@ -6325,9 +6423,6 @@ const docTemplate = `{
                 },
                 "output": {
                     "type": "string"
-                },
-                "source": {
-                    "$ref": "#/definitions/codersdk.WorkspaceAgentLogSource"
                 }
             }
         },
@@ -6342,6 +6437,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/codersdk.WorkspaceApp"
                     }
+                },
+                "derp_force_websockets": {
+                    "type": "boolean"
                 },
                 "derpmap": {
                     "$ref": "#/definitions/tailcfg.DERPMap"
@@ -6371,17 +6469,11 @@ const docTemplate = `{
                 "motd_file": {
                     "type": "string"
                 },
-                "shutdown_script": {
-                    "type": "string"
-                },
-                "shutdown_script_timeout": {
-                    "type": "integer"
-                },
-                "startup_script": {
-                    "type": "string"
-                },
-                "startup_script_timeout": {
-                    "type": "integer"
+                "scripts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.WorkspaceAgentScript"
+                    }
                 },
                 "vscode_port_proxy_uri": {
                     "type": "string"
@@ -6391,6 +6483,9 @@ const docTemplate = `{
         "agentsdk.PatchLogs": {
             "type": "object",
             "properties": {
+                "log_source_id": {
+                    "type": "string"
+                },
                 "logs": {
                     "type": "array",
                     "items": {
@@ -6447,8 +6542,11 @@ const docTemplate = `{
                 "expanded_directory": {
                     "type": "string"
                 },
-                "subsystem": {
-                    "$ref": "#/definitions/codersdk.AgentSubsystem"
+                "subsystems": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AgentSubsystem"
+                    }
                 },
                 "version": {
                     "type": "string"
@@ -6624,13 +6722,16 @@ const docTemplate = `{
                 }
             }
         },
-        "clibase.Struct-array_codersdk_GitAuthConfig": {
+        "clibase.Regexp": {
+            "type": "object"
+        },
+        "clibase.Struct-array_codersdk_ExternalAuthConfig": {
             "type": "object",
             "properties": {
                 "value": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/codersdk.GitAuthConfig"
+                        "$ref": "#/definitions/codersdk.ExternalAuthConfig"
                     }
                 }
             }
@@ -6900,10 +7001,14 @@ const docTemplate = `{
         "codersdk.AgentSubsystem": {
             "type": "string",
             "enum": [
-                "envbox"
+                "envbox",
+                "envbuilder",
+                "exectrace"
             ],
             "x-enum-varnames": [
-                "AgentSubsystemEnvbox"
+                "AgentSubsystemEnvbox",
+                "AgentSubsystemEnvbuilder",
+                "AgentSubsystemExectrace"
             ]
         },
         "codersdk.AppHostResponse": {
@@ -6918,6 +7023,9 @@ const docTemplate = `{
         "codersdk.AppearanceConfig": {
             "type": "object",
             "properties": {
+                "application_name": {
+                    "type": "string"
+                },
                 "logo_url": {
                     "type": "string"
                 },
@@ -7078,9 +7186,6 @@ const docTemplate = `{
         "codersdk.AuthMethods": {
             "type": "object",
             "properties": {
-                "convert_to_oidc_enabled": {
-                    "type": "boolean"
-                },
                 "github": {
                     "$ref": "#/definitions/codersdk.AuthMethod"
                 },
@@ -7266,6 +7371,9 @@ const docTemplate = `{
                 "avatar_url": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -7304,8 +7412,20 @@ const docTemplate = `{
                     "description": "Allow users to cancel in-progress workspace jobs.\n*bool as the default value is \"true\".",
                     "type": "boolean"
                 },
+                "autostop_requirement": {
+                    "description": "AutostopRequirement allows optionally specifying the autostop requirement\nfor workspaces created from this template. This is an enterprise feature.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
+                        }
+                    ]
+                },
                 "default_ttl_ms": {
                     "description": "DefaultTTLMillis allows optionally specifying the default TTL\nfor all workspaces created from this template.",
+                    "type": "integer"
+                },
+                "delete_ttl_ms": {
+                    "description": "TimeTilDormantAutoDeleteMillis allows optionally specifying the max lifetime before Coder\npermanently deletes dormant workspaces created from this template.",
                     "type": "integer"
                 },
                 "description": {
@@ -7320,6 +7440,10 @@ const docTemplate = `{
                     "description": "DisplayName is the displayed name of the template.",
                     "type": "string"
                 },
+                "dormant_ttl_ms": {
+                    "description": "TimeTilDormantMillis allows optionally specifying the max lifetime before Coder\nlocks inactive workspaces created from this template.",
+                    "type": "integer"
+                },
                 "failure_ttl_ms": {
                     "description": "FailureTTLMillis allows optionally specifying the max lifetime before Coder\nstops all resources for failed workspaces created from this template.",
                     "type": "integer"
@@ -7328,29 +7452,13 @@ const docTemplate = `{
                     "description": "Icon is a relative path or external URL that specifies\nan icon to be displayed in the dashboard.",
                     "type": "string"
                 },
-                "inactivity_ttl_ms": {
-                    "description": "InactivityTTLMillis allows optionally specifying the max lifetime before Coder\nlocks inactive workspaces created from this template.",
-                    "type": "integer"
-                },
-                "locked_ttl_ms": {
-                    "description": "LockedTTLMillis allows optionally specifying the max lifetime before Coder\npermanently deletes locked workspaces created from this template.",
-                    "type": "integer"
-                },
                 "max_ttl_ms": {
-                    "description": "TODO(@dean): remove max_ttl once restart_requirement is matured",
+                    "description": "TODO(@dean): remove max_ttl once autostop_requirement is matured",
                     "type": "integer"
                 },
                 "name": {
                     "description": "Name is the name of the template.",
                     "type": "string"
-                },
-                "restart_requirement": {
-                    "description": "RestartRequirement allows optionally specifying the restart requirement\nfor workspaces created from this template. This is an enterprise feature.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/codersdk.TemplateRestartRequirement"
-                        }
-                    ]
                 },
                 "template_version_id": {
                     "description": "VersionID is an in-progress or completed job to use as an initial version\nof the template.\n\nThis is required on creation to enable a user-flow of validating a\ntemplate works. There is no reason the data-model cannot support empty\ntemplates, but it doesn't make sense for users.",
@@ -7526,12 +7634,20 @@ const docTemplate = `{
             ],
             "properties": {
                 "disable_login": {
-                    "description": "DisableLogin sets the user's login type to 'none'. This prevents the user\nfrom being able to use a password or any other authentication method to login.",
+                    "description": "DisableLogin sets the user's login type to 'none'. This prevents the user\nfrom being able to use a password or any other authentication method to login.\nDeprecated: Set UserLoginType=LoginTypeDisabled instead.",
                     "type": "boolean"
                 },
                 "email": {
                     "type": "string",
                     "format": "email"
+                },
+                "login_type": {
+                    "description": "UserLoginType defaults to LoginTypePassword.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.LoginType"
+                        }
+                    ]
                 },
                 "organization_id": {
                     "type": "string",
@@ -7621,8 +7737,7 @@ const docTemplate = `{
         "codersdk.CreateWorkspaceRequest": {
             "type": "object",
             "required": [
-                "name",
-                "template_id"
+                "name"
             ],
             "properties": {
                 "autostart_schedule": {
@@ -7632,13 +7747,19 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "rich_parameter_values": {
-                    "description": "ParameterValues allows for additional parameters to be provided\nduring the initial provision.",
+                    "description": "RichParameterValues allows for additional parameters to be provided\nduring the initial provision.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.WorkspaceBuildParameter"
                     }
                 },
                 "template_id": {
+                    "description": "TemplateID specifies which template should be used for creating the workspace.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "template_version_id": {
+                    "description": "TemplateVersionID can be used to specify a specific version of a template for creating the workspace.",
                     "type": "string",
                     "format": "uuid"
                 },
@@ -7688,6 +7809,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "block_direct": {
+                    "type": "boolean"
+                },
+                "force_websockets": {
                     "type": "boolean"
                 },
                 "path": {
@@ -7854,8 +7978,14 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "git_auth": {
-                    "$ref": "#/definitions/clibase.Struct-array_codersdk_GitAuthConfig"
+                "external_auth": {
+                    "$ref": "#/definitions/clibase.Struct-array_codersdk_ExternalAuthConfig"
+                },
+                "external_token_encryption_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "http_address": {
                     "description": "HTTPAddress is a string because it may be set to zero to disable.",
@@ -7971,6 +8101,23 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.DisplayApp": {
+            "type": "string",
+            "enum": [
+                "vscode",
+                "vscode_insiders",
+                "web_terminal",
+                "port_forwarding_helper",
+                "ssh_helper"
+            ],
+            "x-enum-varnames": [
+                "DisplayAppVSCodeDesktop",
+                "DisplayAppVSCodeInsiders",
+                "DisplayAppWebTerminal",
+                "DisplayAppPortForward",
+                "DisplayAppSSH"
+            ]
+        },
         "codersdk.Entitlement": {
             "type": "string",
             "enum": [
@@ -8002,6 +8149,10 @@ const docTemplate = `{
                 "has_license": {
                     "type": "boolean"
                 },
+                "refreshed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
                 "require_telemetry": {
                     "type": "boolean"
                 },
@@ -8022,20 +8173,164 @@ const docTemplate = `{
                 "moons",
                 "workspace_actions",
                 "tailnet_pg_coordinator",
-                "convert-to-oidc",
                 "single_tailnet",
-                "template_restart_requirement",
-                "template_insights_page"
+                "template_autostop_requirement",
+                "deployment_health_page"
             ],
             "x-enum-varnames": [
                 "ExperimentMoons",
                 "ExperimentWorkspaceActions",
                 "ExperimentTailnetPGCoordinator",
-                "ExperimentConvertToOIDC",
                 "ExperimentSingleTailnet",
-                "ExperimentTemplateRestartRequirement",
-                "ExperimentTemplateInsightsPage"
+                "ExperimentTemplateAutostopRequirement",
+                "ExperimentDeploymentHealthPage"
             ]
+        },
+        "codersdk.ExternalAuth": {
+            "type": "object",
+            "properties": {
+                "app_install_url": {
+                    "description": "AppInstallURL is the URL to install the app.",
+                    "type": "string"
+                },
+                "app_installable": {
+                    "description": "AppInstallable is true if the request for app installs was successful.",
+                    "type": "boolean"
+                },
+                "authenticated": {
+                    "type": "boolean"
+                },
+                "device": {
+                    "type": "boolean"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "installations": {
+                    "description": "AppInstallations are the installations that the user has access to.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ExternalAuthAppInstallation"
+                    }
+                },
+                "user": {
+                    "description": "User is the user that authenticated with the provider.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ExternalAuthUser"
+                        }
+                    ]
+                }
+            }
+        },
+        "codersdk.ExternalAuthAppInstallation": {
+            "type": "object",
+            "properties": {
+                "account": {
+                    "$ref": "#/definitions/codersdk.ExternalAuthUser"
+                },
+                "configure_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "codersdk.ExternalAuthConfig": {
+            "type": "object",
+            "properties": {
+                "app_install_url": {
+                    "type": "string"
+                },
+                "app_installations_url": {
+                    "type": "string"
+                },
+                "auth_url": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "device_code_url": {
+                    "type": "string"
+                },
+                "device_flow": {
+                    "type": "boolean"
+                },
+                "display_icon": {
+                    "description": "DisplayIcon is a URL to an icon to display in the UI.",
+                    "type": "string"
+                },
+                "display_name": {
+                    "description": "DisplayName is shown in the UI to identify the auth config.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is a unique identifier for the auth config.\nIt defaults to ` + "`" + `type` + "`" + ` when not provided.",
+                    "type": "string"
+                },
+                "no_refresh": {
+                    "type": "boolean"
+                },
+                "regex": {
+                    "description": "Regex allows API requesters to match an auth config by\na string (e.g. coder.com) instead of by it's type.\n\nGit clone makes use of this by parsing the URL from:\n'Username for \"https://github.com\":'\nAnd sending it to the Coder server to match against the Regex.",
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token_url": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the type of external auth config.",
+                    "type": "string"
+                },
+                "validate_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ExternalAuthDevice": {
+            "type": "object",
+            "properties": {
+                "device_code": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "interval": {
+                    "type": "integer"
+                },
+                "user_code": {
+                    "type": "string"
+                },
+                "verification_uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ExternalAuthUser": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "profile_url": {
+                    "type": "string"
+                }
+            }
         },
         "codersdk.Feature": {
             "type": "object",
@@ -8076,156 +8371,6 @@ const docTemplate = `{
                 }
             }
         },
-        "codersdk.GitAuth": {
-            "type": "object",
-            "properties": {
-                "app_install_url": {
-                    "description": "AppInstallURL is the URL to install the app.",
-                    "type": "string"
-                },
-                "app_installable": {
-                    "description": "AppInstallable is true if the request for app installs was successful.",
-                    "type": "boolean"
-                },
-                "authenticated": {
-                    "type": "boolean"
-                },
-                "device": {
-                    "type": "boolean"
-                },
-                "installations": {
-                    "description": "AppInstallations are the installations that the user has access to.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/codersdk.GitAuthAppInstallation"
-                    }
-                },
-                "type": {
-                    "type": "string"
-                },
-                "user": {
-                    "description": "User is the user that authenticated with the provider.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/codersdk.GitAuthUser"
-                        }
-                    ]
-                }
-            }
-        },
-        "codersdk.GitAuthAppInstallation": {
-            "type": "object",
-            "properties": {
-                "account": {
-                    "$ref": "#/definitions/codersdk.GitAuthUser"
-                },
-                "configure_url": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "codersdk.GitAuthConfig": {
-            "type": "object",
-            "properties": {
-                "app_install_url": {
-                    "type": "string"
-                },
-                "app_installations_url": {
-                    "type": "string"
-                },
-                "auth_url": {
-                    "type": "string"
-                },
-                "client_id": {
-                    "type": "string"
-                },
-                "device_code_url": {
-                    "type": "string"
-                },
-                "device_flow": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "no_refresh": {
-                    "type": "boolean"
-                },
-                "regex": {
-                    "type": "string"
-                },
-                "scopes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "token_url": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "validate_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "codersdk.GitAuthDevice": {
-            "type": "object",
-            "properties": {
-                "device_code": {
-                    "type": "string"
-                },
-                "expires_in": {
-                    "type": "integer"
-                },
-                "interval": {
-                    "type": "integer"
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_uri": {
-                    "type": "string"
-                }
-            }
-        },
-        "codersdk.GitAuthUser": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "login": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "profile_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "codersdk.GitProvider": {
-            "type": "string",
-            "enum": [
-                "azure-devops",
-                "github",
-                "gitlab",
-                "bitbucket"
-            ],
-            "x-enum-varnames": [
-                "GitProviderAzureDevops",
-                "GitProviderGitHub",
-                "GitProviderGitLab",
-                "GitProviderBitBucket"
-            ]
-        },
         "codersdk.GitSSHKey": {
             "type": "object",
             "properties": {
@@ -8252,6 +8397,9 @@ const docTemplate = `{
                 "avatar_url": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string",
                     "format": "uuid"
@@ -8271,8 +8419,22 @@ const docTemplate = `{
                 },
                 "quota_allowance": {
                     "type": "integer"
+                },
+                "source": {
+                    "$ref": "#/definitions/codersdk.GroupSource"
                 }
             }
+        },
+        "codersdk.GroupSource": {
+            "type": "string",
+            "enum": [
+                "user",
+                "oidc"
+            ],
+            "x-enum-varnames": [
+                "GroupSourceUser",
+                "GroupSourceOIDC"
+            ]
         },
         "codersdk.Healthcheck": {
             "type": "object",
@@ -8294,10 +8456,12 @@ const docTemplate = `{
         "codersdk.InsightsReportInterval": {
             "type": "string",
             "enum": [
-                "day"
+                "day",
+                "week"
             ],
             "x-enum-varnames": [
-                "InsightsReportIntervalDay"
+                "InsightsReportIntervalDay",
+                "InsightsReportIntervalWeek"
             ]
         },
         "codersdk.IssueReconnectingPTYSignedTokenRequest": {
@@ -8328,11 +8492,9 @@ const docTemplate = `{
         "codersdk.JobErrorCode": {
             "type": "string",
             "enum": [
-                "MISSING_TEMPLATE_PARAMETER",
                 "REQUIRED_TEMPLATE_VARIABLES"
             ],
             "x-enum-varnames": [
-                "MissingTemplateParameter",
                 "RequiredTemplateVariables"
             ]
         },
@@ -8422,6 +8584,7 @@ const docTemplate = `{
         "codersdk.LoginType": {
             "type": "string",
             "enum": [
+                "",
                 "password",
                 "github",
                 "oidc",
@@ -8429,6 +8592,7 @@ const docTemplate = `{
                 "none"
             ],
             "x-enum-varnames": [
+                "LoginTypeUnknown",
                 "LoginTypePassword",
                 "LoginTypeGithub",
                 "LoginTypeOIDC",
@@ -8565,7 +8729,14 @@ const docTemplate = `{
                 "auth_url_params": {
                     "type": "object"
                 },
+                "client_cert_file": {
+                    "type": "string"
+                },
                 "client_id": {
+                    "type": "string"
+                },
+                "client_key_file": {
+                    "description": "ClientKeyFile \u0026 ClientCertFile are used in place of ClientSecret for PKI auth.",
                     "type": "string"
                 },
                 "client_secret": {
@@ -8580,8 +8751,14 @@ const docTemplate = `{
                 "email_field": {
                     "type": "string"
                 },
+                "group_auto_create": {
+                    "type": "boolean"
+                },
                 "group_mapping": {
                     "type": "object"
+                },
+                "group_regex_filter": {
+                    "$ref": "#/definitions/clibase.Regexp"
                 },
                 "groups_field": {
                     "type": "string"
@@ -8677,6 +8854,35 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.PatchGroupRequest": {
+            "type": "object",
+            "properties": {
+                "add_users": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "quota_allowance": {
+                    "type": "integer"
+                },
+                "remove_users": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "codersdk.PatchTemplateVersionRequest": {
             "type": "object",
             "properties": {
@@ -8752,6 +8958,9 @@ const docTemplate = `{
                 "daemon_poll_jitter": {
                     "type": "integer"
                 },
+                "daemon_psk": {
+                    "type": "string"
+                },
                 "daemons": {
                     "type": "integer"
                 },
@@ -8819,7 +9028,6 @@ const docTemplate = `{
                 },
                 "error_code": {
                     "enum": [
-                        "MISSING_TEMPLATE_PARAMETER",
                         "REQUIRED_TEMPLATE_VARIABLES"
                     ],
                     "allOf": [
@@ -9151,7 +9359,9 @@ const docTemplate = `{
                 "api_key",
                 "group",
                 "license",
-                "convert_login"
+                "convert_login",
+                "workspace_proxy",
+                "organization"
             ],
             "x-enum-varnames": [
                 "ResourceTypeTemplate",
@@ -9163,7 +9373,9 @@ const docTemplate = `{
                 "ResourceTypeAPIKey",
                 "ResourceTypeGroup",
                 "ResourceTypeLicense",
-                "ResourceTypeConvertLogin"
+                "ResourceTypeConvertLogin",
+                "ResourceTypeWorkspaceProxy",
+                "ResourceTypeOrganization"
             ]
         },
         "codersdk.Response": {
@@ -9350,6 +9562,14 @@ const docTemplate = `{
                 "allow_user_cancel_workspace_jobs": {
                     "type": "boolean"
                 },
+                "autostop_requirement": {
+                    "description": "AutostopRequirement is an enterprise feature. Its value is only used if\nyour license is entitled to use the advanced template scheduling feature.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
+                        }
+                    ]
+                },
                 "build_time_stats": {
                     "$ref": "#/definitions/codersdk.TemplateBuildTimeStats"
                 },
@@ -9374,7 +9594,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "failure_ttl_ms": {
-                    "description": "FailureTTLMillis, InactivityTTLMillis, and LockedTTLMillis are enterprise-only. Their\nvalues are used if your license is entitled to use the advanced\ntemplate scheduling feature.",
+                    "description": "FailureTTLMillis, TimeTilDormantMillis, and TimeTilDormantAutoDeleteMillis are enterprise-only. Their\nvalues are used if your license is entitled to use the advanced\ntemplate scheduling feature.",
                     "type": "integer"
                 },
                 "icon": {
@@ -9384,14 +9604,8 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
-                "inactivity_ttl_ms": {
-                    "type": "integer"
-                },
-                "locked_ttl_ms": {
-                    "type": "integer"
-                },
                 "max_ttl_ms": {
-                    "description": "TODO(@dean): remove max_ttl once restart_requirement is matured",
+                    "description": "TODO(@dean): remove max_ttl once autostop_requirement is matured",
                     "type": "integer"
                 },
                 "name": {
@@ -9407,13 +9621,11 @@ const docTemplate = `{
                         "terraform"
                     ]
                 },
-                "restart_requirement": {
-                    "description": "RestartRequirement is an enterprise feature. Its value is only used if\nyour license is entitled to use the advanced template scheduling feature.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/codersdk.TemplateRestartRequirement"
-                        }
-                    ]
+                "time_til_dormant_autodelete_ms": {
+                    "type": "integer"
+                },
+                "time_til_dormant_ms": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string",
@@ -9459,11 +9671,38 @@ const docTemplate = `{
         "codersdk.TemplateAppsType": {
             "type": "string",
             "enum": [
-                "builtin"
+                "builtin",
+                "app"
             ],
             "x-enum-varnames": [
-                "TemplateAppsTypeBuiltin"
+                "TemplateAppsTypeBuiltin",
+                "TemplateAppsTypeApp"
             ]
+        },
+        "codersdk.TemplateAutostopRequirement": {
+            "type": "object",
+            "properties": {
+                "days_of_week": {
+                    "description": "DaysOfWeek is a list of days of the week on which restarts are required.\nRestarts happen within the user's quiet hours (in their configured\ntimezone). If no days are specified, restarts are not required. Weekdays\ncannot be specified twice.\n\nRestarts will only happen on weekdays in this list on weeks which line up\nwith Weeks.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "monday",
+                            "tuesday",
+                            "wednesday",
+                            "thursday",
+                            "friday",
+                            "saturday",
+                            "sunday"
+                        ]
+                    }
+                },
+                "weeks": {
+                    "description": "Weeks is the number of weeks between required restarts. Weeks are synced\nacross all workspaces (and Coder deployments) using modulo math on a\nhardcoded epoch week of January 2nd, 2023 (the first Monday of 2023).\nValues of 0 or 1 indicate weekly restarts. Values of 2 indicate\nfortnightly restarts, etc.",
+                    "type": "integer"
+                }
+            }
         },
         "codersdk.TemplateBuildTimeStats": {
             "type": "object",
@@ -9513,7 +9752,12 @@ const docTemplate = `{
                     "format": "date-time"
                 },
                 "interval": {
-                    "$ref": "#/definitions/codersdk.InsightsReportInterval"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.InsightsReportInterval"
+                        }
+                    ],
+                    "example": "week"
                 },
                 "start_time": {
                     "type": "string",
@@ -9545,6 +9789,12 @@ const docTemplate = `{
                     "type": "string",
                     "format": "date-time"
                 },
+                "parameters_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.TemplateParameterUsage"
+                    }
+                },
                 "start_time": {
                     "type": "string",
                     "format": "date-time"
@@ -9572,28 +9822,50 @@ const docTemplate = `{
                 }
             }
         },
-        "codersdk.TemplateRestartRequirement": {
+        "codersdk.TemplateParameterUsage": {
             "type": "object",
             "properties": {
-                "days_of_week": {
-                    "description": "DaysOfWeek is a list of days of the week on which restarts are required.\nRestarts happen within the user's quiet hours (in their configured\ntimezone). If no days are specified, restarts are not required. Weekdays\ncannot be specified twice.\n\nRestarts will only happen on weekdays in this list on weeks which line up\nwith Weeks.",
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.TemplateVersionParameterOption"
+                    }
+                },
+                "template_ids": {
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": [
-                            "monday",
-                            "tuesday",
-                            "wednesday",
-                            "thursday",
-                            "friday",
-                            "saturday",
-                            "sunday"
-                        ]
+                        "format": "uuid"
                     }
                 },
-                "weeks": {
-                    "description": "Weeks is the number of weeks between required restarts. Weeks are synced\nacross all workspaces (and Coder deployments) using modulo math on a\nhardcoded epoch week of January 2nd, 2023 (the first Monday of 2023).\nValues of 0 or 1 indicate weekly restarts. Values of 2 indicate\nfortnightly restarts, etc.",
+                "type": {
+                    "type": "string"
+                },
+                "values": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.TemplateParameterValue"
+                    }
+                }
+            }
+        },
+        "codersdk.TemplateParameterValue": {
+            "type": "object",
+            "properties": {
+                "count": {
                     "type": "integer"
+                },
+                "value": {
+                    "type": "string"
                 }
             }
         },
@@ -9731,7 +10003,7 @@ const docTemplate = `{
                 }
             }
         },
-        "codersdk.TemplateVersionGitAuth": {
+        "codersdk.TemplateVersionExternalAuth": {
             "type": "object",
             "properties": {
                 "authenticate_url": {
@@ -9740,11 +10012,17 @@ const docTemplate = `{
                 "authenticated": {
                     "type": "boolean"
                 },
+                "display_icon": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/codersdk.GitProvider"
+                    "type": "string"
                 }
             }
         },
@@ -9889,6 +10167,9 @@ const docTemplate = `{
                 "capture_logs": {
                     "type": "boolean"
                 },
+                "data_dog": {
+                    "type": "boolean"
+                },
                 "enable": {
                     "type": "boolean"
                 },
@@ -9925,6 +10206,9 @@ const docTemplate = `{
         "codersdk.UpdateAppearanceConfig": {
             "type": "object",
             "properties": {
+                "application_name": {
+                    "type": "string"
+                },
                 "logo_url": {
                     "type": "string"
                 },
@@ -10033,10 +10317,10 @@ const docTemplate = `{
                 }
             }
         },
-        "codersdk.UpdateWorkspaceLock": {
+        "codersdk.UpdateWorkspaceDormancy": {
             "type": "object",
             "properties": {
-                "lock": {
+                "dormant": {
                     "type": "boolean"
                 }
             }
@@ -10124,6 +10408,67 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "codersdk.UserActivity": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "format": "uri"
+                },
+                "seconds": {
+                    "type": "integer",
+                    "example": 80500
+                },
+                "template_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "user_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.UserActivityInsightsReport": {
+            "type": "object",
+            "properties": {
+                "end_time": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "start_time": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "template_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.UserActivity"
+                    }
+                }
+            }
+        },
+        "codersdk.UserActivityInsightsResponse": {
+            "type": "object",
+            "properties": {
+                "report": {
+                    "$ref": "#/definitions/codersdk.UserActivityInsightsReport"
                 }
             }
         },
@@ -10232,10 +10577,12 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "active",
+                "dormant",
                 "suspended"
             ],
             "x-enum-varnames": [
                 "UserStatusActive",
+                "UserStatusDormant",
                 "UserStatusSuspended"
             ]
         },
@@ -10287,7 +10634,12 @@ const docTemplate = `{
                     "format": "date-time"
                 },
                 "deleting_at": {
-                    "description": "DeletingAt indicates the time of the upcoming workspace deletion, if applicable; otherwise it is nil.\nWorkspaces may have impending deletions if Template.InactivityTTL feature is turned on and the workspace is inactive.",
+                    "description": "DeletingAt indicates the time at which the workspace will be permanently deleted.\nA workspace is eligible for deletion if it is dormant (a non-nil dormant_at value)\nand a value has been specified for time_til_dormant_autodelete on its template.",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "dormant_at": {
+                    "description": "DormantAt being non-nil indicates a workspace that is dormant.\nA dormant workspace is no longer accessible must be activated.\nIt is subject to deletion if it breaches\nthe duration of the time_til_ field on its template.",
                     "type": "string",
                     "format": "date-time"
                 },
@@ -10310,11 +10662,6 @@ const docTemplate = `{
                 "latest_build": {
                     "$ref": "#/definitions/codersdk.WorkspaceBuild"
                 },
-                "locked_at": {
-                    "description": "LockedAt being non-nil indicates a workspace that has been locked.\nA locked workspace is no longer accessible by a user and must be\nunlocked by an admin. It is subject to deletion if it breaches\nthe duration of the locked_ttl field on its template.",
-                    "type": "string",
-                    "format": "date-time"
-                },
                 "name": {
                     "type": "string"
                 },
@@ -10331,6 +10678,10 @@ const docTemplate = `{
                 },
                 "owner_name": {
                     "type": "string"
+                },
+                "template_active_version_id": {
+                    "type": "string",
+                    "format": "uuid"
                 },
                 "template_allow_user_cancel_workspace_jobs": {
                     "type": "boolean"
@@ -10383,6 +10734,12 @@ const docTemplate = `{
                     "type": "string",
                     "format": "date-time"
                 },
+                "display_apps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.DisplayApp"
+                    }
+                },
                 "environment_variables": {
                     "type": "object",
                     "additionalProperties": {
@@ -10425,9 +10782,11 @@ const docTemplate = `{
                 "lifecycle_state": {
                     "$ref": "#/definitions/codersdk.WorkspaceAgentLifecycle"
                 },
-                "login_before_ready": {
-                    "description": "Deprecated: Use StartupScriptBehavior instead.",
-                    "type": "boolean"
+                "log_sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.WorkspaceAgentLogSource"
+                    }
                 },
                 "logs_length": {
                     "type": "integer"
@@ -10449,31 +10808,32 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
-                "shutdown_script": {
-                    "type": "string"
-                },
-                "shutdown_script_timeout_seconds": {
-                    "type": "integer"
+                "scripts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.WorkspaceAgentScript"
+                    }
                 },
                 "started_at": {
                     "type": "string",
                     "format": "date-time"
                 },
-                "startup_script": {
-                    "type": "string"
-                },
                 "startup_script_behavior": {
-                    "$ref": "#/definitions/codersdk.WorkspaceAgentStartupScriptBehavior"
-                },
-                "startup_script_timeout_seconds": {
-                    "description": "StartupScriptTimeoutSeconds is the number of seconds to wait for the startup script to complete. If the script does not complete within this time, the agent lifecycle will be marked as start_timeout.",
-                    "type": "integer"
+                    "description": "StartupScriptBehavior is a legacy field that is deprecated in favor\nof the ` + "`" + `coder_script` + "`" + ` resource. It's only referenced by old clients.\nDeprecated: Remove in the future!",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.WorkspaceAgentStartupScriptBehavior"
+                        }
+                    ]
                 },
                 "status": {
                     "$ref": "#/definitions/codersdk.WorkspaceAgentStatus"
                 },
-                "subsystem": {
-                    "$ref": "#/definitions/codersdk.AgentSubsystem"
+                "subsystems": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AgentSubsystem"
+                    }
                 },
                 "troubleshooting_url": {
                     "type": "string"
@@ -10490,6 +10850,9 @@ const docTemplate = `{
         "codersdk.WorkspaceAgentConnectionInfo": {
             "type": "object",
             "properties": {
+                "derp_force_websockets": {
+                    "type": "boolean"
+                },
                 "derp_map": {
                     "$ref": "#/definitions/tailcfg.DERPMap"
                 },
@@ -10581,27 +10944,35 @@ const docTemplate = `{
                 },
                 "output": {
                     "type": "string"
+                },
+                "source_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
         "codersdk.WorkspaceAgentLogSource": {
-            "type": "string",
-            "enum": [
-                "startup_script",
-                "shutdown_script",
-                "kubernetes",
-                "envbox",
-                "envbuilder",
-                "external"
-            ],
-            "x-enum-varnames": [
-                "WorkspaceAgentLogSourceStartupScript",
-                "WorkspaceAgentLogSourceShutdownScript",
-                "WorkspaceAgentLogSourceKubernetes",
-                "WorkspaceAgentLogSourceEnvbox",
-                "WorkspaceAgentLogSourceEnvbuilder",
-                "WorkspaceAgentLogSourceExternal"
-            ]
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "workspace_agent_id": {
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
         },
         "codersdk.WorkspaceAgentMetadataDescription": {
             "type": "object",
@@ -10617,6 +10988,36 @@ const docTemplate = `{
                 },
                 "script": {
                     "type": "string"
+                },
+                "timeout": {
+                    "type": "integer"
+                }
+            }
+        },
+        "codersdk.WorkspaceAgentScript": {
+            "type": "object",
+            "properties": {
+                "cron": {
+                    "type": "string"
+                },
+                "log_path": {
+                    "type": "string"
+                },
+                "log_source_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "run_on_start": {
+                    "type": "boolean"
+                },
+                "run_on_stop": {
+                    "type": "boolean"
+                },
+                "script": {
+                    "type": "string"
+                },
+                "start_blocks_login": {
+                    "type": "boolean"
                 },
                 "timeout": {
                     "type": "integer"
@@ -10701,6 +11102,10 @@ const docTemplate = `{
                 "subdomain": {
                     "description": "Subdomain denotes whether the app should be accessed via a path on the\n` + "`" + `coder server` + "`" + ` or via a hostname-based dev URL. If this is set to true\nand there is no app wildcard configured on the server, the app will not\nbe accessible in the UI.",
                     "type": "boolean"
+                },
+                "subdomain_name": {
+                    "description": "SubdomainName is the application domain exposed on the ` + "`" + `coder server` + "`" + `.",
+                    "type": "string"
                 },
                 "url": {
                     "description": "URL is the address being proxied to inside the workspace.\nIf external is specified, this will be opened on the client.",
@@ -10929,6 +11334,9 @@ const docTemplate = `{
                 "derp_enabled": {
                     "type": "boolean"
                 },
+                "derp_only": {
+                    "type": "boolean"
+                },
                 "display_name": {
                     "type": "string"
                 },
@@ -11135,30 +11543,7 @@ const docTemplate = `{
                 }
             }
         },
-        "healthcheck.AccessURLReport": {
-            "type": "object",
-            "properties": {
-                "access_url": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "healthy": {
-                    "type": "boolean"
-                },
-                "healthz_response": {
-                    "type": "string"
-                },
-                "reachable": {
-                    "type": "boolean"
-                },
-                "status_code": {
-                    "type": "integer"
-                }
-            }
-        },
-        "healthcheck.DERPNodeReport": {
+        "derphealth.NodeReport": {
             "type": "object",
             "properties": {
                 "can_exchange_messages": {
@@ -11195,17 +11580,20 @@ const docTemplate = `{
                     "$ref": "#/definitions/derp.ServerInfoMessage"
                 },
                 "round_trip_ping": {
+                    "type": "string"
+                },
+                "round_trip_ping_ms": {
                     "type": "integer"
                 },
                 "stun": {
-                    "$ref": "#/definitions/healthcheck.DERPStunReport"
+                    "$ref": "#/definitions/derphealth.StunReport"
                 },
                 "uses_websocket": {
                     "type": "boolean"
                 }
             }
         },
-        "healthcheck.DERPRegionReport": {
+        "derphealth.RegionReport": {
             "type": "object",
             "properties": {
                 "error": {
@@ -11217,7 +11605,7 @@ const docTemplate = `{
                 "node_reports": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/healthcheck.DERPNodeReport"
+                        "$ref": "#/definitions/derphealth.NodeReport"
                     }
                 },
                 "region": {
@@ -11225,7 +11613,7 @@ const docTemplate = `{
                 }
             }
         },
-        "healthcheck.DERPReport": {
+        "derphealth.Report": {
             "type": "object",
             "properties": {
                 "error": {
@@ -11249,12 +11637,12 @@ const docTemplate = `{
                 "regions": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/healthcheck.DERPRegionReport"
+                        "$ref": "#/definitions/derphealth.RegionReport"
                     }
                 }
             }
         },
-        "healthcheck.DERPStunReport": {
+        "derphealth.StunReport": {
             "type": "object",
             "properties": {
                 "canSTUN": {
@@ -11263,7 +11651,32 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
-                "error": {}
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "healthcheck.AccessURLReport": {
+            "type": "object",
+            "properties": {
+                "access_url": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "healthy": {
+                    "type": "boolean"
+                },
+                "healthz_response": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                },
+                "status_code": {
+                    "type": "integer"
+                }
             }
         },
         "healthcheck.DatabaseReport": {
@@ -11276,6 +11689,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "latency": {
+                    "type": "string"
+                },
+                "latency_ms": {
                     "type": "integer"
                 },
                 "reachable": {
@@ -11297,7 +11713,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/healthcheck.DatabaseReport"
                 },
                 "derp": {
-                    "$ref": "#/definitions/healthcheck.DERPReport"
+                    "$ref": "#/definitions/derphealth.Report"
                 },
                 "failing_sections": {
                     "description": "FailingSections is a list of sections that have failed their healthcheck.",
@@ -11322,25 +11738,17 @@ const docTemplate = `{
         "healthcheck.WebsocketReport": {
             "type": "object",
             "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "healthy": {
-                    "type": "boolean"
-                },
-                "response": {
-                    "$ref": "#/definitions/healthcheck.WebsocketResponse"
-                }
-            }
-        },
-        "healthcheck.WebsocketResponse": {
-            "type": "object",
-            "properties": {
                 "body": {
                     "type": "string"
                 },
                 "code": {
                     "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "healthy": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11446,11 +11854,31 @@ const docTemplate = `{
                 }
             }
         },
+        "tailcfg.DERPHomeParams": {
+            "type": "object",
+            "properties": {
+                "regionScore": {
+                    "description": "RegionScore scales latencies of DERP regions by a given scaling\nfactor when determining which region to use as the home\n(\"preferred\") DERP. Scores in the range (0, 1) will cause this\nregion to be proportionally more preferred, and scores in the range\n(1, ∞) will penalize a region.\n\nIf a region is not present in this map, it is treated as having a\nscore of 1.0.\n\nScores should not be 0 or negative; such scores will be ignored.\n\nA nil map means no change from the previous value (if any); an empty\nnon-nil map can be sent to reset all scores back to 1.0.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
         "tailcfg.DERPMap": {
             "type": "object",
             "properties": {
+                "homeParams": {
+                    "description": "HomeParams, if non-nil, is a change in home parameters.\n\nThe rest of the DEPRMap fields, if zero, means unchanged.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/tailcfg.DERPHomeParams"
+                        }
+                    ]
+                },
                 "omitDefaultRegions": {
-                    "description": "OmitDefaultRegions specifies to not use Tailscale's DERP servers, and only use those\nspecified in this DERPMap. If there are none set outside of the defaults, this is a noop.",
+                    "description": "OmitDefaultRegions specifies to not use Tailscale's DERP servers, and only use those\nspecified in this DERPMap. If there are none set outside of the defaults, this is a noop.\n\nThis field is only meaningful if the Regions map is non-nil (indicating a change).",
                     "type": "boolean"
                 },
                 "regions": {
@@ -11465,6 +11893,10 @@ const docTemplate = `{
         "tailcfg.DERPNode": {
             "type": "object",
             "properties": {
+                "canPort80": {
+                    "description": "CanPort80 specifies whether this DERP node is accessible over HTTP\non port 80 specifically. This is used for captive portal checks.",
+                    "type": "boolean"
+                },
                 "certName": {
                     "description": "CertName optionally specifies the expected TLS cert common\nname. If empty, HostName is used. If CertName is non-empty,\nHostName is only used for the TCP dial (if IPv4/IPv6 are\nnot present) + TLS ClientHello.",
                     "type": "string"
@@ -11617,6 +12049,39 @@ const docTemplate = `{
                 }
             }
         },
+        "workspaceapps.StatsReport": {
+            "type": "object",
+            "properties": {
+                "access_method": {
+                    "$ref": "#/definitions/workspaceapps.AccessMethod"
+                },
+                "agent_id": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "session_ended_at": {
+                    "description": "Updated periodically while app is in use active and when the last connection is closed.",
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "session_started_at": {
+                    "type": "string"
+                },
+                "slug_or_port": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "workspace_id": {
+                    "type": "string"
+                }
+            }
+        },
         "wsproxysdk.AgentIsLegacyResponse": {
             "type": "object",
             "properties": {
@@ -11657,6 +12122,10 @@ const docTemplate = `{
                     "description": "DerpEnabled indicates whether the proxy should be included in the DERP\nmap or not.",
                     "type": "boolean"
                 },
+                "derp_only": {
+                    "description": "DerpOnly indicates whether the proxy should only be included in the DERP\nmap and should not be used for serving apps.",
+                    "type": "boolean"
+                },
                 "hostname": {
                     "description": "ReplicaHostname is the OS hostname of the machine that the proxy is running\non.  This is only used for tracking purposes in the replicas table.",
                     "type": "string"
@@ -11689,6 +12158,12 @@ const docTemplate = `{
                 "app_security_key": {
                     "type": "string"
                 },
+                "derp_force_websockets": {
+                    "type": "boolean"
+                },
+                "derp_map": {
+                    "$ref": "#/definitions/tailcfg.DERPMap"
+                },
                 "derp_mesh_key": {
                     "type": "string"
                 },
@@ -11700,6 +12175,17 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.Replica"
+                    }
+                }
+            }
+        },
+        "wsproxysdk.ReportAppStatsRequest": {
+            "type": "object",
+            "properties": {
+                "stats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspaceapps.StatsReport"
                     }
                 }
             }

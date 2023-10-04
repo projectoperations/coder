@@ -9,13 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/cli/clitest"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/coderd/database/dbauthz"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/pty/ptytest"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/cli/clitest"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/pty/ptytest"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestDelete(t *testing.T) {
@@ -25,10 +25,10 @@ func TestDelete(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 		workspace := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-		coderdtest.AwaitWorkspaceBuildJob(t, client, workspace.LatestBuild.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
 		inv, root := clitest.New(t, "delete", workspace.Name, "-y")
 		clitest.SetupConfig(t, client, root)
 		doneChan := make(chan struct{})
@@ -41,7 +41,7 @@ func TestDelete(t *testing.T) {
 				assert.ErrorIs(t, err, io.EOF)
 			}
 		}()
-		pty.ExpectMatch("workspace has been deleted")
+		pty.ExpectMatch("has been deleted")
 		<-doneChan
 	})
 
@@ -50,10 +50,10 @@ func TestDelete(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 		workspace := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-		coderdtest.AwaitWorkspaceBuildJob(t, client, workspace.LatestBuild.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
 		inv, root := clitest.New(t, "delete", workspace.Name, "-y", "--orphan")
 
 		clitest.SetupConfig(t, client, root)
@@ -68,7 +68,7 @@ func TestDelete(t *testing.T) {
 				assert.ErrorIs(t, err, io.EOF)
 			}
 		}()
-		pty.ExpectMatch("workspace has been deleted")
+		pty.ExpectMatch("has been deleted")
 		<-doneChan
 	})
 
@@ -83,11 +83,11 @@ func TestDelete(t *testing.T) {
 		user := coderdtest.CreateFirstUser(t, client)
 		deleteMeClient, deleteMeUser := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
 		workspace := coderdtest.CreateWorkspace(t, deleteMeClient, user.OrganizationID, template.ID)
-		coderdtest.AwaitWorkspaceBuildJob(t, deleteMeClient, workspace.LatestBuild.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, deleteMeClient, workspace.LatestBuild.ID)
 
 		// The API checks if the user has any workspaces, so we cannot delete a user
 		// this way.
@@ -113,7 +113,7 @@ func TestDelete(t *testing.T) {
 				assert.ErrorIs(t, err, io.EOF)
 			}
 		}()
-		pty.ExpectMatch("workspace has been deleted")
+		pty.ExpectMatch("has been deleted")
 		<-doneChan
 	})
 
@@ -127,10 +127,10 @@ func TestDelete(t *testing.T) {
 		require.NoError(t, err)
 
 		version := coderdtest.CreateTemplateVersion(t, adminClient, orgID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, adminClient, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, adminClient, version.ID)
 		template := coderdtest.CreateTemplate(t, adminClient, orgID, version.ID)
 		workspace := coderdtest.CreateWorkspace(t, client, orgID, template.ID)
-		coderdtest.AwaitWorkspaceBuildJob(t, client, workspace.LatestBuild.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
 
 		inv, root := clitest.New(t, "delete", user.Username+"/"+workspace.Name, "-y")
 		clitest.SetupConfig(t, adminClient, root)
@@ -145,7 +145,7 @@ func TestDelete(t *testing.T) {
 			}
 		}()
 
-		pty.ExpectMatch("workspace has been deleted")
+		pty.ExpectMatch("has been deleted")
 		<-doneChan
 
 		workspace, err = client.Workspace(context.Background(), workspace.ID)

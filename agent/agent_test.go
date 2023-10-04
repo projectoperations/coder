@@ -1,7 +1,6 @@
 package agent_test
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/user"
 	"path"
 	"path/filepath"
@@ -21,10 +21,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	scp "github.com/bramvdbogaerde/go-scp"
+	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/pion/udp"
 	"github.com/pkg/sftp"
@@ -41,18 +43,20 @@ import (
 	"tailscale.com/tailcfg"
 
 	"cdr.dev/slog"
+	"cdr.dev/slog/sloggers/sloghuman"
 	"cdr.dev/slog/sloggers/slogtest"
-	"github.com/coder/coder/agent"
-	"github.com/coder/coder/agent/agentssh"
-	"github.com/coder/coder/agent/agenttest"
-	"github.com/coder/coder/coderd/httpapi"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/codersdk/agentsdk"
-	"github.com/coder/coder/pty"
-	"github.com/coder/coder/pty/ptytest"
-	"github.com/coder/coder/tailnet"
-	"github.com/coder/coder/tailnet/tailnettest"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/agent"
+	"github.com/coder/coder/v2/agent/agentproc"
+	"github.com/coder/coder/v2/agent/agentproc/agentproctest"
+	"github.com/coder/coder/v2/agent/agentssh"
+	"github.com/coder/coder/v2/agent/agenttest"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/agentsdk"
+	"github.com/coder/coder/v2/pty"
+	"github.com/coder/coder/v2/pty/ptytest"
+	"github.com/coder/coder/v2/tailnet"
+	"github.com/coder/coder/v2/tailnet/tailnettest"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -102,7 +106,7 @@ func TestAgent_Stats_ReconnectingPTY(t *testing.T) {
 	//nolint:dogsled
 	conn, _, stats, _, _ := setupAgent(t, agentsdk.Manifest{}, 0)
 
-	ptyConn, err := conn.ReconnectingPTY(ctx, uuid.New(), 128, 128, "/bin/bash")
+	ptyConn, err := conn.ReconnectingPTY(ctx, uuid.New(), 128, 128, "bash")
 	require.NoError(t, err)
 	defer ptyConn.Close()
 
@@ -1055,84 +1059,6 @@ func TestAgent_SSHConnectionEnvVars(t *testing.T) {
 	}
 }
 
-func TestAgent_StartupScript(t *testing.T) {
-	t.Parallel()
-	output := "something"
-	command := "sh -c 'echo " + output + "'"
-	if runtime.GOOS == "windows" {
-		command = "cmd.exe /c echo " + output
-	}
-	t.Run("Success", func(t *testing.T) {
-		t.Parallel()
-		logger := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
-		client := agenttest.NewClient(t,
-			logger,
-			uuid.New(),
-			agentsdk.Manifest{
-				StartupScript: command,
-				DERPMap:       &tailcfg.DERPMap{},
-			},
-			make(chan *agentsdk.Stats),
-			tailnet.NewCoordinator(logger),
-		)
-		closer := agent.New(agent.Options{
-			Client:                 client,
-			Filesystem:             afero.NewMemMapFs(),
-			Logger:                 logger.Named("agent"),
-			ReconnectingPTYTimeout: 0,
-		})
-		t.Cleanup(func() {
-			_ = closer.Close()
-		})
-		assert.Eventually(t, func() bool {
-			got := client.GetLifecycleStates()
-			return len(got) > 0 && got[len(got)-1] == codersdk.WorkspaceAgentLifecycleReady
-		}, testutil.WaitShort, testutil.IntervalMedium)
-
-		require.Len(t, client.GetStartupLogs(), 1)
-		require.Equal(t, output, client.GetStartupLogs()[0].Output)
-	})
-	// This ensures that even when coderd sends back that the startup
-	// script has written too many lines it will still succeed!
-	t.Run("OverflowsAndSkips", func(t *testing.T) {
-		t.Parallel()
-		logger := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
-		client := agenttest.NewClient(t,
-			logger,
-			uuid.New(),
-			agentsdk.Manifest{
-				StartupScript: command,
-				DERPMap:       &tailcfg.DERPMap{},
-			},
-			make(chan *agentsdk.Stats, 50),
-			tailnet.NewCoordinator(logger),
-		)
-		client.PatchWorkspaceLogs = func() error {
-			resp := httptest.NewRecorder()
-			httpapi.Write(context.Background(), resp, http.StatusRequestEntityTooLarge, codersdk.Response{
-				Message: "Too many lines!",
-			})
-			res := resp.Result()
-			defer res.Body.Close()
-			return codersdk.ReadBodyAsError(res)
-		}
-		closer := agent.New(agent.Options{
-			Client:                 client,
-			Filesystem:             afero.NewMemMapFs(),
-			Logger:                 logger.Named("agent"),
-			ReconnectingPTYTimeout: 0,
-		})
-		t.Cleanup(func() {
-			_ = closer.Close()
-		})
-		assert.Eventually(t, func() bool {
-			got := client.GetLifecycleStates()
-			return len(got) > 0 && got[len(got)-1] == codersdk.WorkspaceAgentLifecycleReady
-		}, testutil.WaitShort, testutil.IntervalMedium)
-		require.Len(t, client.GetStartupLogs(), 0)
-	})
-}
-
 func TestAgent_Metadata(t *testing.T) {
 	t.Parallel()
 
@@ -1287,8 +1213,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "sleep 3",
-			StartupScriptTimeout: time.Nanosecond,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:     "sleep 3",
+				Timeout:    time.Millisecond,
+				RunOnStart: true,
+			}},
 		}, 0)
 
 		want := []codersdk.WorkspaceAgentLifecycle{
@@ -1309,8 +1238,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "false",
-			StartupScriptTimeout: 30 * time.Second,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:     "false",
+				Timeout:    30 * time.Second,
+				RunOnStart: true,
+			}},
 		}, 0)
 
 		want := []codersdk.WorkspaceAgentLifecycle{
@@ -1331,8 +1263,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "true",
-			StartupScriptTimeout: 30 * time.Second,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:     "true",
+				Timeout:    30 * time.Second,
+				RunOnStart: true,
+			}},
 		}, 0)
 
 		want := []codersdk.WorkspaceAgentLifecycle{
@@ -1353,8 +1288,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, closer := setupAgent(t, agentsdk.Manifest{
-			ShutdownScript:       "sleep 3",
-			StartupScriptTimeout: 30 * time.Second,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:    "sleep 3",
+				Timeout:   30 * time.Second,
+				RunOnStop: true,
+			}},
 		}, 0)
 
 		assert.Eventually(t, func() bool {
@@ -1391,8 +1329,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, closer := setupAgent(t, agentsdk.Manifest{
-			ShutdownScript:        "sleep 3",
-			ShutdownScriptTimeout: time.Nanosecond,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:    "sleep 3",
+				Timeout:   time.Millisecond,
+				RunOnStop: true,
+			}},
 		}, 0)
 
 		assert.Eventually(t, func() bool {
@@ -1430,8 +1371,11 @@ func TestAgent_Lifecycle(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, closer := setupAgent(t, agentsdk.Manifest{
-			ShutdownScript:        "false",
-			ShutdownScriptTimeout: 30 * time.Second,
+			Scripts: []codersdk.WorkspaceAgentScript{{
+				Script:    "false",
+				Timeout:   30 * time.Second,
+				RunOnStop: true,
+			}},
 		}, 0)
 
 		assert.Eventually(t, func() bool {
@@ -1475,9 +1419,16 @@ func TestAgent_Lifecycle(t *testing.T) {
 			logger,
 			uuid.New(),
 			agentsdk.Manifest{
-				DERPMap:        derpMap,
-				StartupScript:  "echo 1",
-				ShutdownScript: "echo " + expected,
+				DERPMap: derpMap,
+				Scripts: []codersdk.WorkspaceAgentScript{{
+					LogPath:    "coder-startup-script.log",
+					Script:     "echo 1",
+					RunOnStart: true,
+				}, {
+					LogPath:   "coder-shutdown-script.log",
+					Script:    "echo " + expected,
+					RunOnStop: true,
+				}},
 			},
 			make(chan *agentsdk.Stats, 50),
 			tailnet.NewCoordinator(logger),
@@ -1528,9 +1479,7 @@ func TestAgent_Startup(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "true",
-			StartupScriptTimeout: 30 * time.Second,
-			Directory:            "",
+			Directory: "",
 		}, 0)
 		assert.Eventually(t, func() bool {
 			return client.GetStartup().Version != ""
@@ -1542,9 +1491,7 @@ func TestAgent_Startup(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "true",
-			StartupScriptTimeout: 30 * time.Second,
-			Directory:            "~",
+			Directory: "~",
 		}, 0)
 		assert.Eventually(t, func() bool {
 			return client.GetStartup().Version != ""
@@ -1558,9 +1505,7 @@ func TestAgent_Startup(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "true",
-			StartupScriptTimeout: 30 * time.Second,
-			Directory:            "coder/coder",
+			Directory: "coder/coder",
 		}, 0)
 		assert.Eventually(t, func() bool {
 			return client.GetStartup().Version != ""
@@ -1574,9 +1519,7 @@ func TestAgent_Startup(t *testing.T) {
 		t.Parallel()
 
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
-			StartupScript:        "true",
-			StartupScriptTimeout: 30 * time.Second,
-			Directory:            "$HOME",
+			Directory: "$HOME",
 		}, 0)
 		assert.Eventually(t, func() bool {
 			return client.GetStartup().Version != ""
@@ -1587,8 +1530,8 @@ func TestAgent_Startup(t *testing.T) {
 	})
 }
 
+//nolint:paralleltest // This test sets an environment variable.
 func TestAgent_ReconnectingPTY(t *testing.T) {
-	t.Parallel()
 	if runtime.GOOS == "windows" {
 		// This might be our implementation, or ConPTY itself.
 		// It's difficult to find extensive tests for it, so
@@ -1596,61 +1539,125 @@ func TestAgent_ReconnectingPTY(t *testing.T) {
 		t.Skip("ConPTY appears to be inconsistent on Windows.")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
-	defer cancel()
+	backends := []string{"Buffered", "Screen"}
 
-	//nolint:dogsled
-	conn, _, _, _, _ := setupAgent(t, agentsdk.Manifest{}, 0)
-	id := uuid.New()
-	netConn, err := conn.ReconnectingPTY(ctx, id, 100, 100, "/bin/bash")
-	require.NoError(t, err)
-	defer netConn.Close()
+	_, err := exec.LookPath("screen")
+	hasScreen := err == nil
 
-	bufRead := bufio.NewReader(netConn)
-
-	// Brief pause to reduce the likelihood that we send keystrokes while
-	// the shell is simultaneously sending a prompt.
-	time.Sleep(100 * time.Millisecond)
-
-	data, err := json.Marshal(codersdk.ReconnectingPTYRequest{
-		Data: "echo test\r\n",
-	})
-	require.NoError(t, err)
-	_, err = netConn.Write(data)
-	require.NoError(t, err)
-
-	expectLine := func(matcher func(string) bool) {
-		for {
-			line, err := bufRead.ReadString('\n')
-			require.NoError(t, err)
-			if matcher(line) {
-				break
+	for _, backendType := range backends {
+		backendType := backendType
+		t.Run(backendType, func(t *testing.T) {
+			if backendType == "Screen" {
+				t.Parallel()
+				if runtime.GOOS != "linux" {
+					t.Skipf("`screen` is not supported on %s", runtime.GOOS)
+				} else if !hasScreen {
+					t.Skip("`screen` not found")
+				}
+			} else if hasScreen && runtime.GOOS == "linux" {
+				// Set up a PATH that does not have screen in it.
+				bashPath, err := exec.LookPath("bash")
+				require.NoError(t, err)
+				dir, err := os.MkdirTemp("/tmp", "coder-test-reconnecting-pty-PATH")
+				require.NoError(t, err, "create temp dir for reconnecting pty PATH")
+				err = os.Symlink(bashPath, filepath.Join(dir, "bash"))
+				require.NoError(t, err, "symlink bash into reconnecting pty PATH")
+				t.Setenv("PATH", dir)
+			} else {
+				t.Parallel()
 			}
-		}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+			defer cancel()
+
+			//nolint:dogsled
+			conn, _, _, _, _ := setupAgent(t, agentsdk.Manifest{}, 0)
+			id := uuid.New()
+			// --norc disables executing .bashrc, which is often used to customize the bash prompt
+			netConn1, err := conn.ReconnectingPTY(ctx, id, 80, 80, "bash --norc")
+			require.NoError(t, err)
+			defer netConn1.Close()
+			tr1 := testutil.NewTerminalReader(t, netConn1)
+
+			// A second simultaneous connection.
+			netConn2, err := conn.ReconnectingPTY(ctx, id, 80, 80, "bash --norc")
+			require.NoError(t, err)
+			defer netConn2.Close()
+			tr2 := testutil.NewTerminalReader(t, netConn2)
+
+			matchPrompt := func(line string) bool {
+				return strings.Contains(line, "$ ") || strings.Contains(line, "# ")
+			}
+			matchEchoCommand := func(line string) bool {
+				return strings.Contains(line, "echo test")
+			}
+			matchEchoOutput := func(line string) bool {
+				return strings.Contains(line, "test") && !strings.Contains(line, "echo")
+			}
+			matchExitCommand := func(line string) bool {
+				return strings.Contains(line, "exit")
+			}
+			matchExitOutput := func(line string) bool {
+				return strings.Contains(line, "exit") || strings.Contains(line, "logout")
+			}
+
+			// Wait for the prompt before writing commands.  If the command arrives before the prompt is written, screen
+			// will sometimes put the command output on the same line as the command and the test will flake
+			require.NoError(t, tr1.ReadUntil(ctx, matchPrompt), "find prompt")
+			require.NoError(t, tr2.ReadUntil(ctx, matchPrompt), "find prompt")
+
+			data, err := json.Marshal(codersdk.ReconnectingPTYRequest{
+				Data: "echo test\r",
+			})
+			require.NoError(t, err)
+			_, err = netConn1.Write(data)
+			require.NoError(t, err)
+
+			// Once for typing the command...
+			require.NoError(t, tr1.ReadUntil(ctx, matchEchoCommand), "find echo command")
+			// And another time for the actual output.
+			require.NoError(t, tr1.ReadUntil(ctx, matchEchoOutput), "find echo output")
+
+			// Same for the other connection.
+			require.NoError(t, tr2.ReadUntil(ctx, matchEchoCommand), "find echo command")
+			require.NoError(t, tr2.ReadUntil(ctx, matchEchoOutput), "find echo output")
+
+			_ = netConn1.Close()
+			_ = netConn2.Close()
+			netConn3, err := conn.ReconnectingPTY(ctx, id, 80, 80, "bash --norc")
+			require.NoError(t, err)
+			defer netConn3.Close()
+			tr3 := testutil.NewTerminalReader(t, netConn3)
+
+			// Same output again!
+			require.NoError(t, tr3.ReadUntil(ctx, matchEchoCommand), "find echo command")
+			require.NoError(t, tr3.ReadUntil(ctx, matchEchoOutput), "find echo output")
+
+			// Exit should cause the connection to close.
+			data, err = json.Marshal(codersdk.ReconnectingPTYRequest{
+				Data: "exit\r",
+			})
+			require.NoError(t, err)
+			_, err = netConn3.Write(data)
+			require.NoError(t, err)
+
+			// Once for the input and again for the output.
+			require.NoError(t, tr3.ReadUntil(ctx, matchExitCommand), "find exit command")
+			require.NoError(t, tr3.ReadUntil(ctx, matchExitOutput), "find exit output")
+
+			// Wait for the connection to close.
+			require.ErrorIs(t, tr3.ReadUntil(ctx, nil), io.EOF)
+
+			// Try a non-shell command.  It should output then immediately exit.
+			netConn4, err := conn.ReconnectingPTY(ctx, uuid.New(), 80, 80, "echo test")
+			require.NoError(t, err)
+			defer netConn4.Close()
+
+			tr4 := testutil.NewTerminalReader(t, netConn4)
+			require.NoError(t, tr4.ReadUntil(ctx, matchEchoOutput), "find echo output")
+			require.ErrorIs(t, tr4.ReadUntil(ctx, nil), io.EOF)
+		})
 	}
-
-	matchEchoCommand := func(line string) bool {
-		return strings.Contains(line, "echo test")
-	}
-	matchEchoOutput := func(line string) bool {
-		return strings.Contains(line, "test") && !strings.Contains(line, "echo")
-	}
-
-	// Once for typing the command...
-	expectLine(matchEchoCommand)
-	// And another time for the actual output.
-	expectLine(matchEchoOutput)
-
-	_ = netConn.Close()
-	netConn, err = conn.ReconnectingPTY(ctx, id, 100, 100, "/bin/bash")
-	require.NoError(t, err)
-	defer netConn.Close()
-
-	bufRead = bufio.NewReader(netConn)
-
-	// Same output again!
-	expectLine(matchEchoCommand)
-	expectLine(matchEchoOutput)
 }
 
 func TestAgent_Dial(t *testing.T) {
@@ -1818,6 +1825,15 @@ func TestAgent_UpdatedDERP(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	require.Eventually(t, func() bool {
+		conn := closer.TailnetConn()
+		if conn == nil {
+			return false
+		}
+		regionIDs := conn.DERPMap().RegionIDs()
+		return len(regionIDs) == 1 && regionIDs[0] == 2 && conn.Node().PreferredDERP == 2
+	}, testutil.WaitLong, testutil.IntervalFast)
+
 	// Connect from a second client and make sure it uses the new DERP map.
 	conn2 := newClientConn(newDerpMap)
 	require.Equal(t, []int{2}, conn2.DERPMap().RegionIDs())
@@ -1923,6 +1939,96 @@ func TestAgent_WriteVSCodeConfigs(t *testing.T) {
 	}, testutil.WaitShort, testutil.IntervalFast)
 }
 
+func TestAgent_DebugServer(t *testing.T) {
+	t.Parallel()
+
+	derpMap, _ := tailnettest.RunDERPAndSTUN(t)
+	//nolint:dogsled
+	conn, _, _, _, agnt := setupAgent(t, agentsdk.Manifest{
+		DERPMap: derpMap,
+	}, 0)
+
+	awaitReachableCtx := testutil.Context(t, testutil.WaitLong)
+	ok := conn.AwaitReachable(awaitReachableCtx)
+	require.True(t, ok)
+	_ = conn.Close()
+
+	srv := httptest.NewServer(agnt.HTTPDebug())
+	t.Cleanup(srv.Close)
+
+	t.Run("MagicsockDebug", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/debug/magicsock", nil)
+		require.NoError(t, err)
+
+		res, err := srv.Client().Do(req)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		resBody, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.Contains(t, string(resBody), "<h1>magicsock</h1>")
+	})
+
+	t.Run("MagicsockDebugLogging", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("Enable", func(t *testing.T) {
+			t.Parallel()
+
+			ctx := testutil.Context(t, testutil.WaitLong)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/debug/magicsock/debug-logging/t", nil)
+			require.NoError(t, err)
+
+			res, err := srv.Client().Do(req)
+			require.NoError(t, err)
+			defer res.Body.Close()
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			resBody, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.Contains(t, string(resBody), "updated magicsock debug logging to true")
+		})
+
+		t.Run("Disable", func(t *testing.T) {
+			t.Parallel()
+
+			ctx := testutil.Context(t, testutil.WaitLong)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/debug/magicsock/debug-logging/0", nil)
+			require.NoError(t, err)
+
+			res, err := srv.Client().Do(req)
+			require.NoError(t, err)
+			defer res.Body.Close()
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			resBody, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.Contains(t, string(resBody), "updated magicsock debug logging to false")
+		})
+
+		t.Run("Invalid", func(t *testing.T) {
+			t.Parallel()
+
+			ctx := testutil.Context(t, testutil.WaitLong)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/debug/magicsock/debug-logging/blah", nil)
+			require.NoError(t, err)
+
+			res, err := srv.Client().Do(req)
+			require.NoError(t, err)
+			defer res.Body.Close()
+			require.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+			resBody, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.Contains(t, string(resBody), `invalid state "blah", must be a boolean`)
+		})
+	})
+}
+
 func setupSSHCommand(t *testing.T, beforeArgs []string, afterArgs []string) (*ptytest.PTYCmd, pty.Process) {
 	//nolint:dogsled
 	agentConn, _, _, _, _ := setupAgent(t, agentsdk.Manifest{}, 0)
@@ -2004,7 +2110,7 @@ func setupAgent(t *testing.T, metadata agentsdk.Manifest, ptyTimeout time.Durati
 	*agenttest.Client,
 	<-chan *agentsdk.Stats,
 	afero.Fs,
-	io.Closer,
+	agent.Agent,
 ) {
 	logger := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
 	if metadata.DERPMap == nil {
@@ -2241,6 +2347,173 @@ func TestAgent_Metrics_SSH(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAgent_ManageProcessPriority(t *testing.T) {
+	t.Parallel()
+
+	t.Run("OK", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS != "linux" {
+			t.Skip("Skipping non-linux environment")
+		}
+
+		var (
+			expectedProcs = map[int32]agentproc.Process{}
+			fs            = afero.NewMemMapFs()
+			syscaller     = agentproctest.NewMockSyscaller(gomock.NewController(t))
+			ticker        = make(chan time.Time)
+			modProcs      = make(chan []*agentproc.Process)
+			logger        = slog.Make(sloghuman.Sink(io.Discard))
+		)
+
+		// Create some processes.
+		for i := 0; i < 4; i++ {
+			// Create a prioritized process. This process should
+			// have it's oom_score_adj set to -500 and its nice
+			// score should be untouched.
+			var proc agentproc.Process
+			if i == 0 {
+				proc = agentproctest.GenerateProcess(t, fs,
+					func(p *agentproc.Process) {
+						p.CmdLine = "./coder\x00agent\x00--no-reap"
+						p.PID = int32(i)
+					},
+				)
+			} else {
+				proc = agentproctest.GenerateProcess(t, fs,
+					func(p *agentproc.Process) {
+						// Make the cmd something similar to a prioritized
+						// process but differentiate the arguments.
+						p.CmdLine = "./coder\x00stat"
+					},
+				)
+
+				syscaller.EXPECT().SetPriority(proc.PID, 10).Return(nil)
+				syscaller.EXPECT().GetPriority(proc.PID).Return(20, nil)
+			}
+			syscaller.EXPECT().
+				Kill(proc.PID, syscall.Signal(0)).
+				Return(nil)
+
+			expectedProcs[proc.PID] = proc
+		}
+
+		_, _, _, _, _ = setupAgent(t, agentsdk.Manifest{}, 0, func(c *agenttest.Client, o *agent.Options) {
+			o.Syscaller = syscaller
+			o.ModifiedProcesses = modProcs
+			o.EnvironmentVariables = map[string]string{agent.EnvProcPrioMgmt: "1"}
+			o.Filesystem = fs
+			o.Logger = logger
+			o.ProcessManagementTick = ticker
+		})
+		actualProcs := <-modProcs
+		require.Len(t, actualProcs, len(expectedProcs)-1)
+	})
+
+	t.Run("IgnoreCustomNice", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS != "linux" {
+			t.Skip("Skipping non-linux environment")
+		}
+
+		var (
+			expectedProcs = map[int32]agentproc.Process{}
+			fs            = afero.NewMemMapFs()
+			ticker        = make(chan time.Time)
+			syscaller     = agentproctest.NewMockSyscaller(gomock.NewController(t))
+			modProcs      = make(chan []*agentproc.Process)
+			logger        = slog.Make(sloghuman.Sink(io.Discard))
+		)
+
+		// Create some processes.
+		for i := 0; i < 2; i++ {
+			proc := agentproctest.GenerateProcess(t, fs)
+			syscaller.EXPECT().
+				Kill(proc.PID, syscall.Signal(0)).
+				Return(nil)
+
+			if i == 0 {
+				// Set a random nice score. This one should not be adjusted by
+				// our management loop.
+				syscaller.EXPECT().GetPriority(proc.PID).Return(25, nil)
+			} else {
+				syscaller.EXPECT().GetPriority(proc.PID).Return(20, nil)
+				syscaller.EXPECT().SetPriority(proc.PID, 10).Return(nil)
+			}
+
+			expectedProcs[proc.PID] = proc
+		}
+
+		_, _, _, _, _ = setupAgent(t, agentsdk.Manifest{}, 0, func(c *agenttest.Client, o *agent.Options) {
+			o.Syscaller = syscaller
+			o.ModifiedProcesses = modProcs
+			o.EnvironmentVariables = map[string]string{agent.EnvProcPrioMgmt: "1"}
+			o.Filesystem = fs
+			o.Logger = logger
+			o.ProcessManagementTick = ticker
+		})
+		actualProcs := <-modProcs
+		// We should ignore the process with a custom nice score.
+		require.Len(t, actualProcs, 1)
+	})
+
+	t.Run("DisabledByDefault", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS != "linux" {
+			t.Skip("Skipping non-linux environment")
+		}
+
+		var (
+			buf bytes.Buffer
+			wr  = &syncWriter{
+				w: &buf,
+			}
+		)
+		log := slog.Make(sloghuman.Sink(wr)).Leveled(slog.LevelDebug)
+
+		_, _, _, _, _ = setupAgent(t, agentsdk.Manifest{}, 0, func(c *agenttest.Client, o *agent.Options) {
+			o.Logger = log
+		})
+
+		require.Eventually(t, func() bool {
+			wr.mu.Lock()
+			defer wr.mu.Unlock()
+			return strings.Contains(buf.String(), "process priority not enabled")
+		}, testutil.WaitLong, testutil.IntervalFast)
+	})
+
+	t.Run("DisabledForNonLinux", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS == "linux" {
+			t.Skip("Skipping linux environment")
+		}
+
+		var (
+			buf bytes.Buffer
+			wr  = &syncWriter{
+				w: &buf,
+			}
+		)
+		log := slog.Make(sloghuman.Sink(wr)).Leveled(slog.LevelDebug)
+
+		_, _, _, _, _ = setupAgent(t, agentsdk.Manifest{}, 0, func(c *agenttest.Client, o *agent.Options) {
+			o.Logger = log
+			// Try to enable it so that we can assert that non-linux
+			// environments are truly disabled.
+			o.EnvironmentVariables = map[string]string{agent.EnvProcPrioMgmt: "1"}
+		})
+		require.Eventually(t, func() bool {
+			wr.mu.Lock()
+			defer wr.mu.Unlock()
+
+			return strings.Contains(buf.String(), "process priority not enabled")
+		}, testutil.WaitLong, testutil.IntervalFast)
+	})
+}
+
 func verifyCollectedMetrics(t *testing.T, expected []agentsdk.AgentMetric, actual []*promgo.MetricFamily) bool {
 	t.Helper()
 
@@ -2261,4 +2534,15 @@ func verifyCollectedMetrics(t *testing.T, expected []agentsdk.AgentMetric, actua
 		}
 	}
 	return true
+}
+
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }

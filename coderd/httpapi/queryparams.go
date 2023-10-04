@@ -10,8 +10,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/codersdk"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // QueryParamParser is a helper for parsing all query params and gathering all
@@ -45,7 +44,7 @@ func (p *QueryParamParser) ErrorExcessParams(values url.Values) {
 		if _, ok := p.Parsed[k]; !ok {
 			p.Errors = append(p.Errors, codersdk.ValidationError{
 				Field:  k,
-				Detail: fmt.Sprintf("Query param %q is not a valid query param", k),
+				Detail: fmt.Sprintf("%q is not a valid query param", k),
 			})
 		}
 	}
@@ -158,10 +157,10 @@ func (p *QueryParamParser) Strings(vals url.Values, def []string, queryParam str
 	})
 }
 
-// ValidEnum parses enum query params. Add more to the list as needed.
+// ValidEnum represents an enum that can be parsed and validated.
 type ValidEnum interface {
-	database.ResourceType | database.AuditAction | database.BuildReason | database.UserStatus |
-		database.WorkspaceStatus
+	// Add more types as needed (avoid importing large dependency trees).
+	~string
 
 	// Valid is required on the enum type to be used with ParseEnum.
 	Valid() bool

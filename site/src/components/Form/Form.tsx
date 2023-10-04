@@ -1,30 +1,31 @@
-import { makeStyles } from "@mui/styles"
+import { makeStyles } from "@mui/styles";
+import { AlphaBadge } from "components/DeploySettingsLayout/Badges";
 import {
   FormFooterProps as BaseFormFooterProps,
   FormFooter as BaseFormFooter,
-} from "components/FormFooter/FormFooter"
-import { Stack } from "components/Stack/Stack"
+} from "components/FormFooter/FormFooter";
+import { Stack } from "components/Stack/Stack";
 import {
   createContext,
   FC,
   HTMLProps,
   PropsWithChildren,
   useContext,
-} from "react"
-import { combineClasses } from "utils/combineClasses"
+} from "react";
+import { combineClasses } from "utils/combineClasses";
 
-type FormContextValue = { direction?: "horizontal" | "vertical" }
+type FormContextValue = { direction?: "horizontal" | "vertical" };
 
 const FormContext = createContext<FormContextValue>({
   direction: "horizontal",
-})
+});
 
 type FormProps = HTMLProps<HTMLFormElement> & {
-  direction?: FormContextValue["direction"]
-}
+  direction?: FormContextValue["direction"];
+};
 
 export const Form: FC<FormProps> = ({ direction, className, ...formProps }) => {
-  const styles = useStyles({ direction })
+  const styles = useStyles({ direction });
 
   return (
     <FormContext.Provider value={{ direction }}>
@@ -33,8 +34,8 @@ export const Form: FC<FormProps> = ({ direction, className, ...formProps }) => {
         className={combineClasses([styles.form, className])}
       />
     </FormContext.Provider>
-  )
-}
+  );
+};
 
 export const HorizontalForm: FC<HTMLProps<HTMLFormElement>> = ({
   children,
@@ -44,8 +45,8 @@ export const HorizontalForm: FC<HTMLProps<HTMLFormElement>> = ({
     <Form direction="horizontal" {...formProps}>
       {children}
     </Form>
-  )
-}
+  );
+};
 
 export const VerticalForm: FC<HTMLProps<HTMLFormElement>> = ({
   children,
@@ -55,22 +56,23 @@ export const VerticalForm: FC<HTMLProps<HTMLFormElement>> = ({
     <Form direction="vertical" {...formProps}>
       {children}
     </Form>
-  )
-}
+  );
+};
 
 export const FormSection: FC<
   PropsWithChildren & {
-    title: string | JSX.Element
-    description: string | JSX.Element
+    title: string | JSX.Element;
+    description: string | JSX.Element;
     classes?: {
-      root?: string
-      sectionInfo?: string
-      infoTitle?: string
-    }
+      root?: string;
+      sectionInfo?: string;
+      infoTitle?: string;
+    };
+    alpha?: boolean;
   }
-> = ({ children, title, description, classes = {} }) => {
-  const formContext = useContext(FormContext)
-  const styles = useStyles(formContext)
+> = ({ children, title, description, classes = {}, alpha = false }) => {
+  const formContext = useContext(FormContext);
+  const styles = useStyles(formContext);
 
   return (
     <div className={combineClasses([styles.formSection, classes.root])}>
@@ -83,21 +85,23 @@ export const FormSection: FC<
         <h2
           className={combineClasses([
             styles.formSectionInfoTitle,
+            alpha && styles.formSectionInfoTitleAlpha,
             classes.infoTitle,
           ])}
         >
           {title}
+          {alpha && <AlphaBadge />}
         </h2>
         <div className={styles.formSectionInfoDescription}>{description}</div>
       </div>
 
       {children}
     </div>
-  )
-}
+  );
+};
 
 export const FormFields: FC<PropsWithChildren> = ({ children }) => {
-  const styles = useStyles()
+  const styles = useStyles();
   return (
     <Stack
       direction="column"
@@ -106,22 +110,22 @@ export const FormFields: FC<PropsWithChildren> = ({ children }) => {
     >
       {children}
     </Stack>
-  )
-}
+  );
+};
 
 export const FormFooter: FC<BaseFormFooterProps> = (props) => {
-  const formFooterStyles = useFormFooterStyles()
+  const formFooterStyles = useFormFooterStyles();
   return (
     <BaseFormFooter
       {...props}
       styles={{ ...formFooterStyles, ...props.styles }}
     />
-  )
-}
+  );
+};
 const getFlexDirection = ({ direction }: FormContextValue = {}):
   | "row"
   | "column" =>
-  direction === "horizontal" ? ("row" as const) : ("column" as const)
+  direction === "horizontal" ? ("row" as const) : ("column" as const);
 
 const useStyles = makeStyles((theme) => ({
   form: {
@@ -171,6 +175,13 @@ const useStyles = makeStyles((theme) => ({
     marginBottom: theme.spacing(1),
   },
 
+  formSectionInfoTitleAlpha: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing(1.5),
+  },
+
   formSectionInfoDescription: {
     fontSize: 14,
     color: theme.palette.text.secondary,
@@ -181,7 +192,7 @@ const useStyles = makeStyles((theme) => ({
   formSectionFields: {
     width: "100%",
   },
-}))
+}));
 
 const useFormFooterStyles = makeStyles((theme) => ({
   button: {
@@ -203,4 +214,4 @@ const useFormFooterStyles = makeStyles((theme) => ({
       gap: theme.spacing(1),
     },
   },
-}))
+}));

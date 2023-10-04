@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/coder/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi"
 )
 
 // Results is the full compiled results for a set of test runs.
@@ -114,6 +114,10 @@ func (r *Results) PrintText(w io.Writer) {
 	}
 
 	_, _ = fmt.Fprintln(w, "\n\nTest results:")
+	if r.TotalRuns == 0 {
+		_, _ = fmt.Fprintln(w, "\tNo tests run")
+		return
+	}
 	_, _ = fmt.Fprintf(w, "\tPass:  %d\n", r.TotalPass)
 	_, _ = fmt.Fprintf(w, "\tFail:  %d\n", r.TotalFail)
 	_, _ = fmt.Fprintf(w, "\tTotal: %d\n", r.TotalRuns)

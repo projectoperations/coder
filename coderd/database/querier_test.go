@@ -13,10 +13,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/coderd/database/dbgen"
-	"github.com/coder/coder/coderd/database/migrations"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/migrations"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestGetDeploymentWorkspaceAgentStats(t *testing.T) {
@@ -43,7 +44,7 @@ func TestGetDeploymentWorkspaceAgentStats(t *testing.T) {
 			ConnectionMedianLatencyMS: 2,
 			SessionCountVSCode:        1,
 		})
-		stats, err := db.GetDeploymentWorkspaceAgentStats(ctx, database.Now().Add(-time.Hour))
+		stats, err := db.GetDeploymentWorkspaceAgentStats(ctx, dbtime.Now().Add(-time.Hour))
 		require.NoError(t, err)
 
 		require.Equal(t, int64(2), stats.WorkspaceTxBytes)
@@ -62,7 +63,7 @@ func TestGetDeploymentWorkspaceAgentStats(t *testing.T) {
 		db := database.New(sqlDB)
 		ctx := context.Background()
 		agentID := uuid.New()
-		insertTime := database.Now()
+		insertTime := dbtime.Now()
 		dbgen.WorkspaceAgentStat(t, db, database.WorkspaceAgentStat{
 			CreatedAt:                 insertTime.Add(-time.Second),
 			AgentID:                   agentID,
@@ -80,7 +81,7 @@ func TestGetDeploymentWorkspaceAgentStats(t *testing.T) {
 			ConnectionMedianLatencyMS: 2,
 			SessionCountVSCode:        1,
 		})
-		stats, err := db.GetDeploymentWorkspaceAgentStats(ctx, database.Now().Add(-time.Hour))
+		stats, err := db.GetDeploymentWorkspaceAgentStats(ctx, dbtime.Now().Add(-time.Hour))
 		require.NoError(t, err)
 
 		require.Equal(t, int64(2), stats.WorkspaceTxBytes)
@@ -102,7 +103,7 @@ func TestInsertWorkspaceAgentLogs(t *testing.T) {
 	require.NoError(t, err)
 	db := database.New(sqlDB)
 	org := dbgen.Organization(t, db, database.Organization{})
-	job := dbgen.ProvisionerJob(t, db, database.ProvisionerJob{
+	job := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{
 		OrganizationID: org.ID,
 	})
 	resource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{
@@ -111,12 +112,15 @@ func TestInsertWorkspaceAgentLogs(t *testing.T) {
 	agent := dbgen.WorkspaceAgent(t, db, database.WorkspaceAgent{
 		ResourceID: resource.ID,
 	})
+	source := dbgen.WorkspaceAgentLogSource(t, db, database.WorkspaceAgentLogSource{
+		WorkspaceAgentID: agent.ID,
+	})
 	logs, err := db.InsertWorkspaceAgentLogs(ctx, database.InsertWorkspaceAgentLogsParams{
-		AgentID:   agent.ID,
-		CreatedAt: []time.Time{database.Now()},
-		Output:    []string{"first"},
-		Level:     []database.LogLevel{database.LogLevelInfo},
-		Source:    []database.WorkspaceAgentLogSource{database.WorkspaceAgentLogSourceExternal},
+		AgentID:     agent.ID,
+		CreatedAt:   dbtime.Now(),
+		Output:      []string{"first"},
+		Level:       []database.LogLevel{database.LogLevelInfo},
+		LogSourceID: source.ID,
 		// 1 MB is the max
 		OutputLength: 1 << 20,
 	})
@@ -125,10 +129,10 @@ func TestInsertWorkspaceAgentLogs(t *testing.T) {
 
 	_, err = db.InsertWorkspaceAgentLogs(ctx, database.InsertWorkspaceAgentLogsParams{
 		AgentID:      agent.ID,
-		CreatedAt:    []time.Time{database.Now()},
+		CreatedAt:    dbtime.Now(),
 		Output:       []string{"second"},
 		Level:        []database.LogLevel{database.LogLevelInfo},
-		Source:       []database.WorkspaceAgentLogSource{database.WorkspaceAgentLogSourceExternal},
+		LogSourceID:  source.ID,
 		OutputLength: 1,
 	})
 	require.True(t, database.IsWorkspaceAgentLogsLimitError(err))
@@ -334,7 +338,7 @@ func TestQueuePosition(t *testing.T) {
 	jobs := []database.ProvisionerJob{}
 	jobIDs := []uuid.UUID{}
 	for i := 0; i < jobCount; i++ {
-		job := dbgen.ProvisionerJob(t, db, database.ProvisionerJob{
+		job := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{
 			OrganizationID: org.ID,
 			Tags:           database.StringMap{},
 		})
@@ -360,7 +364,7 @@ func TestQueuePosition(t *testing.T) {
 
 	job, err := db.AcquireProvisionerJob(ctx, database.AcquireProvisionerJobParams{
 		StartedAt: sql.NullTime{
-			Time:  database.Now(),
+			Time:  dbtime.Now(),
 			Valid: true,
 		},
 		Types: database.AllProvisionerTypeValues(),
@@ -402,7 +406,7 @@ func TestUserLastSeenFilter(t *testing.T) {
 		require.NoError(t, err)
 		db := database.New(sqlDB)
 		ctx := context.Background()
-		now := database.Now()
+		now := dbtime.Now()
 
 		yesterday := dbgen.User(t, db, database.User{
 			LastSeenAt: now.Add(time.Hour * -25),

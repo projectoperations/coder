@@ -7,18 +7,21 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pion/udp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/cli/clitest"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/provisioner/echo"
-	"github.com/coder/coder/pty/ptytest"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/agent"
+	"github.com/coder/coder/v2/agent/agenttest"
+	"github.com/coder/coder/v2/cli/clitest"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/provisioner/echo"
+	"github.com/coder/coder/v2/pty/ptytest"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestPortForward_None(t *testing.T) {
@@ -302,34 +305,21 @@ func runAgent(t *testing.T, client *codersdk.Client, userID uuid.UUID) codersdk.
 	agentToken := uuid.NewString()
 	version := coderdtest.CreateTemplateVersion(t, client, orgID, &echo.Responses{
 		Parse:          echo.ParseComplete,
-		ProvisionPlan:  echo.ProvisionComplete,
+		ProvisionPlan:  echo.PlanComplete,
 		ProvisionApply: echo.ProvisionApplyWithAgent(agentToken),
 	})
 
 	// Create template and workspace
 	template := coderdtest.CreateTemplate(t, client, orgID, version.ID)
-	coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 	workspace := coderdtest.CreateWorkspace(t, client, orgID, template.ID)
-	coderdtest.AwaitWorkspaceBuildJob(t, client, workspace.LatestBuild.ID)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
 
-	// Start workspace agent in a goroutine
-	inv, root := clitest.New(t, "agent", "--agent-token", agentToken, "--agent-url", client.URL.String())
-	clitest.SetupConfig(t, client, root)
-	pty := ptytest.New(t)
-	inv.Stdin = pty.Input()
-	inv.Stdout = pty.Output()
-	inv.Stderr = pty.Output()
-	errC := make(chan error)
-	agentCtx, agentCancel := context.WithCancel(ctx)
-	t.Cleanup(func() {
-		agentCancel()
-		err := <-errC
-		require.NoError(t, err)
-	})
-	go func() {
-		errC <- inv.WithContext(agentCtx).Run()
-	}()
-
+	_ = agenttest.New(t, client.URL, agentToken,
+		func(o *agent.Options) {
+			o.SSHMaxTimeout = 60 * time.Second
+		},
+	)
 	coderdtest.AwaitWorkspaceAgents(t, client, workspace.ID)
 
 	return workspace

@@ -1,3 +1,5 @@
+//go:build !slim
+
 package cli
 
 import (
@@ -5,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -22,19 +25,19 @@ import (
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/sloghuman"
 
-	"github.com/coder/coder/cli/clibase"
-	"github.com/coder/coder/cli/cliui"
-	"github.com/coder/coder/coderd/httpapi"
-	"github.com/coder/coder/coderd/tracing"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/cryptorand"
-	"github.com/coder/coder/scaletest/agentconn"
-	"github.com/coder/coder/scaletest/createworkspaces"
-	"github.com/coder/coder/scaletest/dashboard"
-	"github.com/coder/coder/scaletest/harness"
-	"github.com/coder/coder/scaletest/reconnectingpty"
-	"github.com/coder/coder/scaletest/workspacebuild"
-	"github.com/coder/coder/scaletest/workspacetraffic"
+	"github.com/coder/coder/v2/cli/clibase"
+	"github.com/coder/coder/v2/cli/cliui"
+	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/tracing"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/cryptorand"
+	"github.com/coder/coder/v2/scaletest/agentconn"
+	"github.com/coder/coder/v2/scaletest/createworkspaces"
+	"github.com/coder/coder/v2/scaletest/dashboard"
+	"github.com/coder/coder/v2/scaletest/harness"
+	"github.com/coder/coder/v2/scaletest/reconnectingpty"
+	"github.com/coder/coder/v2/scaletest/workspacebuild"
+	"github.com/coder/coder/v2/scaletest/workspacetraffic"
 )
 
 const scaletestTracerName = "coder_scaletest"
@@ -105,7 +108,6 @@ func (s *scaletestTracingFlags) provider(ctx context.Context) (trace.TracerProvi
 
 	tracerProvider, closeTracing, err := tracing.TracerProvider(ctx, scaletestTracerName, tracing.TracerOpts{
 		Default:   s.traceEnable,
-		Coder:     s.traceCoder,
 		Honeycomb: s.traceHoneycombAPIKey,
 	})
 	if err != nil {
@@ -427,7 +429,7 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 
 			cliui.Errorf(inv.Stderr, "Found %d scaletest workspaces\n", len(workspaces))
 			if len(workspaces) != 0 {
-				cliui.Infof(inv.Stdout, "Deleting scaletest workspaces..."+"\n")
+				cliui.Infof(inv.Stdout, "Deleting scaletest workspaces...")
 				harness := harness.NewTestHarness(cleanupStrategy.toStrategy(), harness.ConcurrentExecutionStrategy{})
 
 				for i, w := range workspaces {
@@ -443,7 +445,7 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 					return xerrors.Errorf("run test harness to delete workspaces (harness failure, not a test failure): %w", err)
 				}
 
-				cliui.Infof(inv.Stdout, "Done deleting scaletest workspaces:"+"\n")
+				cliui.Infof(inv.Stdout, "Done deleting scaletest workspaces:")
 				res := harness.Results()
 				res.PrintText(inv.Stderr)
 
@@ -460,7 +462,7 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 
 			cliui.Errorf(inv.Stderr, "Found %d scaletest users\n", len(users))
 			if len(users) != 0 {
-				cliui.Infof(inv.Stdout, "Deleting scaletest users..."+"\n")
+				cliui.Infof(inv.Stdout, "Deleting scaletest users...")
 				harness := harness.NewTestHarness(cleanupStrategy.toStrategy(), harness.ConcurrentExecutionStrategy{})
 
 				for i, u := range users {
@@ -479,7 +481,7 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 					return xerrors.Errorf("run test harness to delete users (harness failure, not a test failure): %w", err)
 				}
 
-				cliui.Infof(inv.Stdout, "Done deleting scaletest users:"+"\n")
+				cliui.Infof(inv.Stdout, "Done deleting scaletest users:")
 				res := harness.Results()
 				res.PrintText(inv.Stderr)
 
@@ -858,7 +860,7 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 			Flag:        "use-host-login",
 			Env:         "CODER_SCALETEST_USE_HOST_LOGIN",
 			Default:     "false",
-			Description: "Use the use logged in on the host machine, instead of creating users.",
+			Description: "Use the user logged in on the host machine, instead of creating users.",
 			Value:       clibase.BoolOf(&useHostUser),
 		},
 	}
@@ -1047,9 +1049,10 @@ func (r *RootCmd) scaletestWorkspaceTraffic() *clibase.Cmd {
 
 func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 	var (
-		count   int64
-		minWait time.Duration
-		maxWait time.Duration
+		interval time.Duration
+		jitter   time.Duration
+		headless bool
+		randSeed int64
 
 		client          = &codersdk.Client{}
 		tracingFlags    = &scaletestTracingFlags{}
@@ -1066,6 +1069,12 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 			r.InitClient(client),
 		),
 		Handler: func(inv *clibase.Invocation) error {
+			if !(interval > 0) {
+				return xerrors.Errorf("--interval must be greater than zero")
+			}
+			if !(jitter < interval) {
+				return xerrors.Errorf("--jitter must be less than --interval")
+			}
 			ctx := inv.Context()
 			logger := slog.Make(sloghuman.Sink(inv.Stdout)).Leveled(slog.LevelInfo)
 			tracerProvider, closeTracing, tracingEnabled, err := tracingFlags.provider(ctx)
@@ -1095,19 +1104,42 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 
 			th := harness.NewTestHarness(strategy.toStrategy(), cleanupStrategy.toStrategy())
 
-			for i := int64(0); i < count; i++ {
-				name := fmt.Sprintf("dashboard-%d", i)
-				config := dashboard.Config{
-					MinWait:   minWait,
-					MaxWait:   maxWait,
-					Trace:     tracingEnabled,
-					Logger:    logger.Named(name),
-					RollTable: dashboard.DefaultActions,
+			users, err := getScaletestUsers(ctx, client)
+			if err != nil {
+				return xerrors.Errorf("get scaletest users")
+			}
+
+			for _, usr := range users {
+				//nolint:gosec // not used for cryptographic purposes
+				rndGen := rand.New(rand.NewSource(randSeed))
+				name := fmt.Sprintf("dashboard-%s", usr.Username)
+				userTokResp, err := client.CreateToken(ctx, usr.ID.String(), codersdk.CreateTokenRequest{
+					Lifetime:  30 * 24 * time.Hour,
+					Scope:     "",
+					TokenName: fmt.Sprintf("scaletest-%d", time.Now().Unix()),
+				})
+				if err != nil {
+					return xerrors.Errorf("create token for user: %w", err)
 				}
+
+				userClient := codersdk.New(client.URL)
+				userClient.SetSessionToken(userTokResp.Key)
+
+				config := dashboard.Config{
+					Interval:   interval,
+					Jitter:     jitter,
+					Trace:      tracingEnabled,
+					Logger:     logger.Named(name),
+					Headless:   headless,
+					ActionFunc: dashboard.ClickRandomElement,
+					RandIntn:   rndGen.Intn,
+				}
+				//nolint:gocritic
+				logger.Info(ctx, "runner config", slog.F("min_wait", interval), slog.F("max_wait", jitter), slog.F("headless", headless), slog.F("trace", tracingEnabled))
 				if err := config.Validate(); err != nil {
 					return err
 				}
-				var runner harness.Runnable = dashboard.NewRunner(client, metrics, config)
+				var runner harness.Runnable = dashboard.NewRunner(userClient, metrics, config)
 				if tracingEnabled {
 					runner = &runnableTraceWrapper{
 						tracer:   tracer,
@@ -1144,25 +1176,32 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 
 	cmd.Options = []clibase.Option{
 		{
-			Flag:        "count",
-			Env:         "CODER_SCALETEST_DASHBOARD_COUNT",
-			Default:     "1",
-			Description: "Number of concurrent workers.",
-			Value:       clibase.Int64Of(&count),
+			Flag:        "interval",
+			Env:         "CODER_SCALETEST_DASHBOARD_INTERVAL",
+			Default:     "3s",
+			Description: "Interval between actions.",
+			Value:       clibase.DurationOf(&interval),
 		},
 		{
-			Flag:        "min-wait",
-			Env:         "CODER_SCALETEST_DASHBOARD_MIN_WAIT",
-			Default:     "100ms",
-			Description: "Minimum wait between fetches.",
-			Value:       clibase.DurationOf(&minWait),
+			Flag:        "jitter",
+			Env:         "CODER_SCALETEST_DASHBOARD_JITTER",
+			Default:     "2s",
+			Description: "Jitter between actions.",
+			Value:       clibase.DurationOf(&jitter),
 		},
 		{
-			Flag:        "max-wait",
-			Env:         "CODER_SCALETEST_DASHBOARD_MAX_WAIT",
-			Default:     "1s",
-			Description: "Maximum wait between fetches.",
-			Value:       clibase.DurationOf(&maxWait),
+			Flag:        "headless",
+			Env:         "CODER_SCALETEST_DASHBOARD_HEADLESS",
+			Default:     "true",
+			Description: "Controls headless mode. Setting to false is useful for debugging.",
+			Value:       clibase.BoolOf(&headless),
+		},
+		{
+			Flag:        "rand-seed",
+			Env:         "CODER_SCALETEST_DASHBOARD_RAND_SEED",
+			Default:     "0",
+			Description: "Seed for the random number generator.",
+			Value:       clibase.Int64Of(&randSeed),
 		},
 	}
 

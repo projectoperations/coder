@@ -9,11 +9,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/cli/clitest"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/pty/ptytest"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/cli/clitest"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/pty/ptytest"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestTemplateList(t *testing.T) {
@@ -23,11 +23,11 @@ func TestTemplateList(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		firstVersion := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, firstVersion.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, firstVersion.ID)
 		firstTemplate := coderdtest.CreateTemplate(t, client, user.OrganizationID, firstVersion.ID)
 
 		secondVersion := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, secondVersion.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, secondVersion.ID)
 		secondTemplate := coderdtest.CreateTemplate(t, client, user.OrganizationID, secondVersion.ID)
 
 		inv, root := clitest.New(t, "templates", "list")
@@ -58,11 +58,11 @@ func TestTemplateList(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		firstVersion := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, firstVersion.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, firstVersion.ID)
 		_ = coderdtest.CreateTemplate(t, client, user.OrganizationID, firstVersion.ID)
 
 		secondVersion := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, secondVersion.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, secondVersion.ID)
 		_ = coderdtest.CreateTemplate(t, client, user.OrganizationID, secondVersion.ID)
 
 		inv, root := clitest.New(t, "templates", "list", "--output=json")

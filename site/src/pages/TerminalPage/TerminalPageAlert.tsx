@@ -1,18 +1,18 @@
-import { AlertColor } from "@mui/material/Alert/Alert"
-import Button from "@mui/material/Button"
-import Link from "@mui/material/Link"
-import { Alert } from "components/Alert/Alert"
-import { ReactNode } from "react"
-import { docs } from "utils/docs"
+import { AlertColor } from "@mui/material/Alert/Alert";
+import Button from "@mui/material/Button";
+import Link from "@mui/material/Link";
+import { Alert } from "components/Alert/Alert";
+import { ReactNode } from "react";
+import { docs } from "utils/docs";
 
-export type TerminalPageAlertType = "error" | "starting" | "success"
+export type TerminalPageAlertType = "error" | "starting" | "success";
 
 type MapAlertTypeToComponent = {
   [key in TerminalPageAlertType]: {
-    severity: AlertColor
-    children: ReactNode | undefined
-  }
-}
+    severity: AlertColor;
+    children: ReactNode | undefined;
+  };
+};
 
 const mapAlertTypeToText: MapAlertTypeToComponent = {
   error: {
@@ -53,7 +53,7 @@ const mapAlertTypeToText: MapAlertTypeToComponent = {
     severity: "info",
     children: (
       <>
-        Startup script is still running. You can continue using this terminal,
+        Startup scripts are still running. You can continue using this terminal,
         but{" "}
         <Link
           title="your workspace may be incomplete."
@@ -71,10 +71,10 @@ const mapAlertTypeToText: MapAlertTypeToComponent = {
     severity: "success",
     children: (
       <>
-        Startup script has completed successfully. The workspace is ready but
+        Startup scripts have completed successfully. The workspace is ready but
         this{" "}
         <Link
-          title="session was started before the startup script finished"
+          title="session was started before the startup scripts finished"
           href={docs("/templates#your-workspace-may-be-incomplete")}
           target="_blank"
           rel="noreferrer"
@@ -86,16 +86,16 @@ const mapAlertTypeToText: MapAlertTypeToComponent = {
       </>
     ),
   },
-}
+};
 
 export default ({
   alertType,
   onDismiss,
 }: {
-  alertType: TerminalPageAlertType
-  onDismiss: () => void
+  alertType: TerminalPageAlertType;
+  onDismiss: () => void;
 }) => {
-  const severity = mapAlertTypeToText[alertType].severity
+  const severity = mapAlertTypeToText[alertType].severity;
   return (
     <Alert
       severity={severity}
@@ -118,7 +118,7 @@ export default ({
           onClick={() => {
             // By redirecting the user without the session in the URL we
             // create a new one
-            window.location.href = window.location.pathname
+            window.location.href = window.location.pathname;
           }}
         >
           Refresh session
@@ -127,5 +127,5 @@ export default ({
     >
       {mapAlertTypeToText[alertType].children}
     </Alert>
-  )
-}
+  );
+};

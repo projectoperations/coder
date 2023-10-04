@@ -4,24 +4,30 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/coder/v2/coderd"
+	"github.com/coder/coder/v2/coderd/coderdtest/oidctest"
+
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/coder/coder/cli/clibase"
-	"github.com/coder/coder/coderd/audit"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/coderd/database/dbauthz"
-	"github.com/coder/coder/coderd/rbac"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/cli/clibase"
+	"github.com/coder/coder/v2/coderd/audit"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/util/slice"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestFirstUser(t *testing.T) {
@@ -328,7 +334,7 @@ func TestDeleteUser(t *testing.T) {
 		user := coderdtest.CreateFirstUser(t, client)
 		anotherClient, another := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 		coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
 		err := client.DeleteUser(context.Background(), another.ID)
@@ -401,6 +407,7 @@ func TestPostLogout(t *testing.T) {
 	})
 }
 
+// nolint:bodyclose
 func TestPostUsers(t *testing.T) {
 	t.Parallel()
 	t.Run("NoAuth", func(t *testing.T) {
@@ -559,11 +566,70 @@ func TestPostUsers(t *testing.T) {
 		// should be Never since they haven't performed a request.
 		for _, user := range allUsersRes.Users {
 			if user.ID == firstUser.ID {
-				require.WithinDuration(t, firstUser.LastSeenAt, database.Now(), testutil.WaitShort)
+				require.WithinDuration(t, firstUser.LastSeenAt, dbtime.Now(), testutil.WaitShort)
 			} else {
 				require.Zero(t, user.LastSeenAt)
 			}
 		}
+	})
+
+	t.Run("CreateNoneLoginType", func(t *testing.T) {
+		t.Parallel()
+		client := coderdtest.New(t, nil)
+		first := coderdtest.CreateFirstUser(t, client)
+
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+		defer cancel()
+
+		user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
+			OrganizationID: first.OrganizationID,
+			Email:          "another@user.org",
+			Username:       "someone-else",
+			Password:       "",
+			UserLoginType:  codersdk.LoginTypeNone,
+		})
+		require.NoError(t, err)
+
+		found, err := client.User(ctx, user.ID.String())
+		require.NoError(t, err)
+		require.Equal(t, found.LoginType, codersdk.LoginTypeNone)
+	})
+
+	t.Run("CreateOIDCLoginType", func(t *testing.T) {
+		t.Parallel()
+		email := "another@user.org"
+		fake := oidctest.NewFakeIDP(t,
+			oidctest.WithServing(),
+		)
+		cfg := fake.OIDCConfig(t, nil, func(cfg *coderd.OIDCConfig) {
+			cfg.AllowSignups = true
+		})
+
+		client := coderdtest.New(t, &coderdtest.Options{
+			OIDCConfig: cfg,
+		})
+		first := coderdtest.CreateFirstUser(t, client)
+
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+		defer cancel()
+
+		_, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
+			OrganizationID: first.OrganizationID,
+			Email:          email,
+			Username:       "someone-else",
+			Password:       "",
+			UserLoginType:  codersdk.LoginTypeOIDC,
+		})
+		require.NoError(t, err)
+
+		// Try to log in with OIDC.
+		userClient, _ := fake.Login(t, client, jwt.MapClaims{
+			"email": email,
+		})
+
+		found, err := userClient.User(ctx, "me")
+		require.NoError(t, err)
+		require.Equal(t, found.LoginType, codersdk.LoginTypeOIDC)
 	})
 }
 
@@ -1048,6 +1114,35 @@ func TestPutUserSuspend(t *testing.T) {
 	})
 }
 
+func TestActivateDormantUser(t *testing.T) {
+	t.Parallel()
+	client := coderdtest.New(t, nil)
+
+	// Create users
+	me := coderdtest.CreateFirstUser(t, client)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+	defer cancel()
+	anotherUser, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
+		Email:          "coder@coder.com",
+		Username:       "coder",
+		Password:       "SomeStrongPassword!",
+		OrganizationID: me.OrganizationID,
+	})
+	require.NoError(t, err)
+
+	// Ensure that new user has dormant account
+	require.Equal(t, codersdk.UserStatusDormant, anotherUser.Status)
+
+	// Activate user account
+	_, err = client.UpdateUserStatus(ctx, anotherUser.Username, codersdk.UserStatusActive)
+	require.NoError(t, err)
+
+	// Verify if the account is active now
+	anotherUser, err = client.User(ctx, anotherUser.Username)
+	require.NoError(t, err)
+	require.Equal(t, codersdk.UserStatusActive, anotherUser.Status)
+}
+
 func TestGetUser(t *testing.T) {
 	t.Parallel()
 
@@ -1368,17 +1463,21 @@ func TestGetUsers(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		bruno, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-			Email:          "bruno@email.com",
-			Username:       "bruno",
+		_, err = client.UpdateUserStatus(ctx, alice.Username, codersdk.UserStatusSuspended)
+		require.NoError(t, err)
+
+		// Tom will be active
+		tom, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
+			Email:          "tom@email.com",
+			Username:       "tom",
 			Password:       "MySecurePassword!",
 			OrganizationID: first.OrganizationID,
 		})
 		require.NoError(t, err)
-		active = append(active, bruno)
 
-		_, err = client.UpdateUserStatus(ctx, alice.Username, codersdk.UserStatusSuspended)
+		tom, err = client.UpdateUserStatus(ctx, tom.Username, codersdk.UserStatusActive)
 		require.NoError(t, err)
+		active = append(active, tom)
 
 		res, err := client.Users(ctx, codersdk.UsersRequest{
 			Status: codersdk.UserStatusActive,
@@ -1496,7 +1595,7 @@ func TestWorkspacesByUser(t *testing.T) {
 		newUserClient := codersdk.New(client.URL)
 		newUserClient.SetSessionToken(auth.SessionToken)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 		coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
 
@@ -1508,6 +1607,44 @@ func TestWorkspacesByUser(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res.Workspaces, 1)
 	})
+}
+
+func TestDormantUser(t *testing.T) {
+	t.Parallel()
+
+	client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
+	user := coderdtest.CreateFirstUser(t, client)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+	defer cancel()
+
+	// Create a new user
+	newUser, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
+		Email:          "test@coder.com",
+		Username:       "someone",
+		Password:       "MySecurePassword!",
+		OrganizationID: user.OrganizationID,
+	})
+	require.NoError(t, err)
+
+	// User should be dormant as they haven't logged in yet
+	users, err := client.Users(ctx, codersdk.UsersRequest{Search: newUser.Username})
+	require.NoError(t, err)
+	require.Len(t, users.Users, 1)
+	require.Equal(t, codersdk.UserStatusDormant, users.Users[0].Status)
+
+	// User logs in now
+	_, err = client.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
+		Email:    newUser.Email,
+		Password: "MySecurePassword!",
+	})
+	require.NoError(t, err)
+
+	// User status should be active now
+	users, err = client.Users(ctx, codersdk.UsersRequest{Search: newUser.Username})
+	require.NoError(t, err)
+	require.Len(t, users.Users, 1)
+	require.Equal(t, codersdk.UserStatusActive, users.Users[0].Status)
 }
 
 // TestSuspendedPagination is when the after_id is a suspended record.
@@ -1733,8 +1870,8 @@ func assertPagination(ctx context.Context, t *testing.T, client *codersdk.Client
 
 // sortUsers sorts by (created_at, id)
 func sortUsers(users []codersdk.User) {
-	sort.Slice(users, func(i, j int) bool {
-		return strings.ToLower(users[i].Username) < strings.ToLower(users[j].Username)
+	slices.SortFunc(users, func(a, b codersdk.User) int {
+		return slice.Ascending(strings.ToLower(a.Username), strings.ToLower(b.Username))
 	})
 }
 

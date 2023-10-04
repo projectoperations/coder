@@ -21,6 +21,7 @@ import (
 	"tailscale.com/types/key"
 
 	"cdr.dev/slog"
+	"github.com/coder/coder/v2/coderd/util/slice"
 )
 
 // Coordinator exchanges nodes with agents to establish connections.
@@ -145,7 +146,7 @@ func (c *coordinator) ServeMultiAgent(id uuid.UUID) MultiAgentConn {
 		OnSubscribe:       c.core.clientSubscribeToAgent,
 		OnUnsubscribe:     c.core.clientUnsubscribeFromAgent,
 		OnNodeUpdate:      c.core.clientNodeUpdate,
-		OnRemove:          c.core.clientDisconnected,
+		OnRemove:          func(enq Queue) { c.core.clientDisconnected(enq.UniqueID()) },
 	}).Init()
 	c.core.addClient(id, m)
 	return m
@@ -190,8 +191,16 @@ type core struct {
 	legacyAgents map[uuid.UUID]struct{}
 }
 
+type QueueKind int
+
+const (
+	QueueKindClient QueueKind = 1 + iota
+	QueueKindAgent
+)
+
 type Queue interface {
 	UniqueID() uuid.UUID
+	Kind() QueueKind
 	Enqueue(n []*Node) error
 	Name() string
 	Stats() (start, lastWrite int64)
@@ -199,6 +208,7 @@ type Queue interface {
 	// CoordinatorClose is used by the coordinator when closing a Queue. It
 	// should skip removing itself from the coordinator.
 	CoordinatorClose() error
+	Done() <-chan struct{}
 	Close() error
 }
 
@@ -263,7 +273,7 @@ func (c *coordinator) ServeClient(conn net.Conn, id, agentID uuid.UUID) error {
 	logger := c.core.clientLogger(id, agentID)
 	logger.Debug(ctx, "coordinating client")
 
-	tc := NewTrackedConn(ctx, cancel, conn, id, logger, id.String(), 0)
+	tc := NewTrackedConn(ctx, cancel, conn, id, logger, id.String(), 0, QueueKindClient)
 	defer tc.Close()
 
 	c.core.addClient(id, tc)
@@ -508,7 +518,7 @@ func (c *core) initAndTrackAgent(ctx context.Context, cancel func(), conn net.Co
 		overwrites = oldAgentSocket.Overwrites() + 1
 		_ = oldAgentSocket.Close()
 	}
-	tc := NewTrackedConn(ctx, cancel, conn, unique, logger, name, overwrites)
+	tc := NewTrackedConn(ctx, cancel, conn, unique, logger, name, overwrites, QueueKindAgent)
 	c.agentNameCache.Add(id, name)
 
 	sockets, ok := c.agentToConnectionSockets[id]
@@ -683,14 +693,14 @@ func HTTPDebugFromLocal(
 				LastWriteAge: now.Sub(time.Unix(lastWrite, 0)).Round(time.Second),
 			})
 		}
-		slices.SortFunc(agent.Connections, func(a, b *HTMLClient) bool {
-			return a.Name < b.Name
+		slices.SortFunc(agent.Connections, func(a, b *HTMLClient) int {
+			return slice.Ascending(a.Name, b.Name)
 		})
 
 		data.Agents = append(data.Agents, agent)
 	}
-	slices.SortFunc(data.Agents, func(a, b *HTMLAgent) bool {
-		return a.Name < b.Name
+	slices.SortFunc(data.Agents, func(a, b *HTMLAgent) int {
+		return slice.Ascending(a.Name, b.Name)
 	})
 
 	for agentID, conns := range agentToConnectionSocketsMap {
@@ -719,14 +729,14 @@ func HTTPDebugFromLocal(
 				LastWriteAge: now.Sub(time.Unix(lastWrite, 0)).Round(time.Second),
 			})
 		}
-		slices.SortFunc(agent.Connections, func(a, b *HTMLClient) bool {
-			return a.Name < b.Name
+		slices.SortFunc(agent.Connections, func(a, b *HTMLClient) int {
+			return slice.Ascending(a.Name, b.Name)
 		})
 
 		data.MissingAgents = append(data.MissingAgents, agent)
 	}
-	slices.SortFunc(data.MissingAgents, func(a, b *HTMLAgent) bool {
-		return a.Name < b.Name
+	slices.SortFunc(data.MissingAgents, func(a, b *HTMLAgent) int {
+		return slice.Ascending(a.Name, b.Name)
 	})
 
 	for id, node := range nodesMap {
@@ -737,8 +747,8 @@ func HTTPDebugFromLocal(
 			Node: node,
 		})
 	}
-	slices.SortFunc(data.Nodes, func(a, b *HTMLNode) bool {
-		return a.Name+a.ID.String() < b.Name+b.ID.String()
+	slices.SortFunc(data.Nodes, func(a, b *HTMLNode) int {
+		return slice.Ascending(a.Name+a.ID.String(), b.Name+b.ID.String())
 	})
 
 	return data

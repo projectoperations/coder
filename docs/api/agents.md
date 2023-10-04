@@ -311,12 +311,12 @@ curl -X PATCH http://coder-server:8080/api/v2/workspaceagents/me/logs \
 
 ```json
 {
+  "log_source_id": "string",
   "logs": [
     {
       "created_at": "string",
       "level": "trace",
-      "output": "string",
-      "source": "startup_script"
+      "output": "string"
     }
   ]
 }
@@ -389,10 +389,18 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/me/manifest \
       "sharing_level": "owner",
       "slug": "string",
       "subdomain": true,
+      "subdomain_name": "string",
       "url": "string"
     }
   ],
+  "derp_force_websockets": true,
   "derpmap": {
+    "homeParams": {
+      "regionScore": {
+        "property1": 0,
+        "property2": 0
+      }
+    },
     "omitDefaultRegions": true,
     "regions": {
       "property1": {
@@ -400,6 +408,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/me/manifest \
         "embeddedRelay": true,
         "nodes": [
           {
+            "canPort80": true,
             "certName": "string",
             "derpport": 0,
             "forceHTTP": true,
@@ -423,6 +432,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/me/manifest \
         "embeddedRelay": true,
         "nodes": [
           {
+            "canPort80": true,
             "certName": "string",
             "derpport": 0,
             "forceHTTP": true,
@@ -460,10 +470,18 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/me/manifest \
     }
   ],
   "motd_file": "string",
-  "shutdown_script": "string",
-  "shutdown_script_timeout": 0,
-  "startup_script": "string",
-  "startup_script_timeout": 0,
+  "scripts": [
+    {
+      "cron": "string",
+      "log_path": "string",
+      "log_source_id": "4197ab25-95cf-4b91-9c78-f7f2af5d353a",
+      "run_on_start": true,
+      "run_on_stop": true,
+      "script": "string",
+      "start_blocks_login": true,
+      "timeout": 0
+    }
+  ],
   "vscode_port_proxy_uri": "string"
 }
 ```
@@ -566,12 +584,12 @@ curl -X PATCH http://coder-server:8080/api/v2/workspaceagents/me/startup-logs \
 
 ```json
 {
+  "log_source_id": "string",
   "logs": [
     {
       "created_at": "string",
       "level": "trace",
-      "output": "string",
-      "source": "startup_script"
+      "output": "string"
     }
   ]
 }
@@ -649,6 +667,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent} \
       "sharing_level": "owner",
       "slug": "string",
       "subdomain": true,
+      "subdomain_name": "string",
       "url": "string"
     }
   ],
@@ -657,6 +676,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent} \
   "created_at": "2019-08-24T14:15:22Z",
   "directory": "string",
   "disconnected_at": "2019-08-24T14:15:22Z",
+  "display_apps": ["vscode"],
   "environment_variables": {
     "property1": "string",
     "property2": "string"
@@ -681,21 +701,37 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent} \
     }
   },
   "lifecycle_state": "created",
-  "login_before_ready": true,
+  "log_sources": [
+    {
+      "created_at": "2019-08-24T14:15:22Z",
+      "display_name": "string",
+      "icon": "string",
+      "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+      "workspace_agent_id": "7ad2e618-fea7-4c1a-b70a-f501566a72f1"
+    }
+  ],
   "logs_length": 0,
   "logs_overflowed": true,
   "name": "string",
   "operating_system": "string",
   "ready_at": "2019-08-24T14:15:22Z",
   "resource_id": "4d5215ed-38bb-48ed-879a-fdb9ca58522f",
-  "shutdown_script": "string",
-  "shutdown_script_timeout_seconds": 0,
+  "scripts": [
+    {
+      "cron": "string",
+      "log_path": "string",
+      "log_source_id": "4197ab25-95cf-4b91-9c78-f7f2af5d353a",
+      "run_on_start": true,
+      "run_on_stop": true,
+      "script": "string",
+      "start_blocks_login": true,
+      "timeout": 0
+    }
+  ],
   "started_at": "2019-08-24T14:15:22Z",
-  "startup_script": "string",
   "startup_script_behavior": "blocking",
-  "startup_script_timeout_seconds": 0,
   "status": "connecting",
-  "subsystem": "envbox",
+  "subsystems": ["envbox"],
   "troubleshooting_url": "string",
   "updated_at": "2019-08-24T14:15:22Z",
   "version": "string"
@@ -735,7 +771,14 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent}/con
 
 ```json
 {
+  "derp_force_websockets": true,
   "derp_map": {
+    "homeParams": {
+      "regionScore": {
+        "property1": 0,
+        "property2": 0
+      }
+    },
     "omitDefaultRegions": true,
     "regions": {
       "property1": {
@@ -743,6 +786,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent}/con
         "embeddedRelay": true,
         "nodes": [
           {
+            "canPort80": true,
             "certName": "string",
             "derpport": 0,
             "forceHTTP": true,
@@ -766,6 +810,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent}/con
         "embeddedRelay": true,
         "nodes": [
           {
+            "canPort80": true,
             "certName": "string",
             "derpport": 0,
             "forceHTTP": true,
@@ -900,7 +945,8 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent}/log
     "created_at": "2019-08-24T14:15:22Z",
     "id": 0,
     "level": "trace",
-    "output": "string"
+    "output": "string",
+    "source_id": "ae50a35c-df42-4eff-ba26-f8bc28d2af81"
   }
 ]
 ```
@@ -922,6 +968,7 @@ Status Code **200**
 | `» id`         | integer                                          | false    |              |             |
 | `» level`      | [codersdk.LogLevel](schemas.md#codersdkloglevel) | false    |              |             |
 | `» output`     | string                                           | false    |              |             |
+| `» source_id`  | string(uuid)                                     | false    |              |             |
 
 #### Enumerated Values
 
@@ -994,7 +1041,8 @@ curl -X GET http://coder-server:8080/api/v2/workspaceagents/{workspaceagent}/sta
     "created_at": "2019-08-24T14:15:22Z",
     "id": 0,
     "level": "trace",
-    "output": "string"
+    "output": "string",
+    "source_id": "ae50a35c-df42-4eff-ba26-f8bc28d2af81"
   }
 ]
 ```
@@ -1016,6 +1064,7 @@ Status Code **200**
 | `» id`         | integer                                          | false    |              |             |
 | `» level`      | [codersdk.LogLevel](schemas.md#codersdkloglevel) | false    |              |             |
 | `» output`     | string                                           | false    |              |             |
+| `» source_id`  | string(uuid)                                     | false    |              |             |
 
 #### Enumerated Values
 

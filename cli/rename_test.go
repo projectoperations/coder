@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/coder/coder/cli/clitest"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/pty/ptytest"
-	"github.com/coder/coder/testutil"
+	"github.com/coder/coder/v2/cli/clitest"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/pty/ptytest"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestRename(t *testing.T) {
@@ -18,10 +18,10 @@ func TestRename(t *testing.T) {
 	client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 	user := coderdtest.CreateFirstUser(t, client)
 	version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-	coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 	workspace := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-	coderdtest.AwaitWorkspaceBuildJob(t, client, workspace.LatestBuild.ID)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 	defer cancel()

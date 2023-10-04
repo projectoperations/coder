@@ -8,11 +8,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/cli/clitest"
-	"github.com/coder/coder/cli/cliui"
-	"github.com/coder/coder/coderd/coderdtest"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/pty/ptytest"
+	"github.com/coder/pretty"
+
+	"github.com/coder/coder/v2/cli/clitest"
+	"github.com/coder/coder/v2/cli/cliui"
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/pty/ptytest"
 )
 
 func TestTemplateDelete(t *testing.T) {
@@ -24,7 +26,7 @@ func TestTemplateDelete(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
 		inv, root := clitest.New(t, "templates", "delete", template.Name)
@@ -37,7 +39,7 @@ func TestTemplateDelete(t *testing.T) {
 			execDone <- inv.Run()
 		}()
 
-		pty.ExpectMatch(fmt.Sprintf("Delete these templates: %s?", cliui.DefaultStyles.Code.Render(template.Name)))
+		pty.ExpectMatch(fmt.Sprintf("Delete these templates: %s?", pretty.Sprint(cliui.DefaultStyles.Code, template.Name)))
 		pty.WriteLine("yes")
 
 		require.NoError(t, <-execDone)
@@ -55,7 +57,7 @@ func TestTemplateDelete(t *testing.T) {
 		templateNames := []string{}
 		for i := 0; i < 3; i++ {
 			version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-			_ = coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+			_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 			template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 			templates = append(templates, template)
 			templateNames = append(templateNames, template.Name)
@@ -80,7 +82,7 @@ func TestTemplateDelete(t *testing.T) {
 		templateNames := []string{}
 		for i := 0; i < 3; i++ {
 			version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-			_ = coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+			_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 			template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 			templates = append(templates, template)
 			templateNames = append(templateNames, template.Name)
@@ -95,7 +97,7 @@ func TestTemplateDelete(t *testing.T) {
 			execDone <- inv.Run()
 		}()
 
-		pty.ExpectMatch(fmt.Sprintf("Delete these templates: %s?", cliui.DefaultStyles.Code.Render(strings.Join(templateNames, ", "))))
+		pty.ExpectMatch(fmt.Sprintf("Delete these templates: %s?", pretty.Sprint(cliui.DefaultStyles.Code, strings.Join(templateNames, ", "))))
 		pty.WriteLine("yes")
 
 		require.NoError(t, <-execDone)
@@ -112,7 +114,7 @@ func TestTemplateDelete(t *testing.T) {
 		client := coderdtest.New(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
 		user := coderdtest.CreateFirstUser(t, client)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		_ = coderdtest.AwaitTemplateVersionJob(t, client, version.ID)
+		_ = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
 		inv, root := clitest.New(t, "templates", "delete")

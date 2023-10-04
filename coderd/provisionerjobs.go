@@ -16,13 +16,13 @@ import (
 
 	"cdr.dev/slog"
 
-	"github.com/coder/coder/coderd/database"
-	"github.com/coder/coder/coderd/database/db2sdk"
-	"github.com/coder/coder/coderd/database/dbauthz"
-	"github.com/coder/coder/coderd/database/pubsub"
-	"github.com/coder/coder/coderd/httpapi"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/provisionersdk"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/db2sdk"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/pubsub"
+	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/provisionersdk"
 )
 
 // Returns provisioner logs based on query parameters.
@@ -124,6 +124,32 @@ func (api *API) provisionerJobResources(rw http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// nolint:gocritic // GetWorkspaceAgentScriptsByAgentIDs is a system function.
+	scripts, err := api.Database.GetWorkspaceAgentScriptsByAgentIDs(dbauthz.AsSystemRestricted(ctx), resourceAgentIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Internal error fetching workspace agent scripts.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	// nolint:gocritic // GetWorkspaceAgentLogSourcesByAgentIDs is a system function.
+	logSources, err := api.Database.GetWorkspaceAgentLogSourcesByAgentIDs(dbauthz.AsSystemRestricted(ctx), resourceAgentIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Internal error fetching workspace agent log sources.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
 	// nolint:gocritic // GetWorkspaceResourceMetadataByResourceIDs is a system function.
 	resourceMetadata, err := api.Database.GetWorkspaceResourceMetadataByResourceIDs(dbauthz.AsSystemRestricted(ctx), resourceIDs)
 	if err != nil {
@@ -147,9 +173,21 @@ func (api *API) provisionerJobResources(rw http.ResponseWriter, r *http.Request,
 					dbApps = append(dbApps, app)
 				}
 			}
+			dbScripts := make([]database.WorkspaceAgentScript, 0)
+			for _, script := range scripts {
+				if script.WorkspaceAgentID == agent.ID {
+					dbScripts = append(dbScripts, script)
+				}
+			}
+			dbLogSources := make([]database.WorkspaceAgentLogSource, 0)
+			for _, logSource := range logSources {
+				if logSource.WorkspaceAgentID == agent.ID {
+					dbLogSources = append(dbLogSources, logSource)
+				}
+			}
 
 			apiAgent, err := convertWorkspaceAgent(
-				api.DERPMap(), *api.TailnetCoordinator.Load(), agent, convertApps(dbApps), api.AgentInactiveDisconnectTimeout,
+				api.DERPMap(), *api.TailnetCoordinator.Load(), agent, convertProvisionedApps(dbApps), convertScripts(dbScripts), convertLogSources(dbLogSources), api.AgentInactiveDisconnectTimeout,
 				api.DeploymentValues.AgentFallbackTroubleshootingURL.String(),
 			)
 			if err != nil {
@@ -402,7 +440,7 @@ func (f *logFollower) follow() {
 				if f.ctx.Err() == nil && !xerrors.Is(err, io.EOF) {
 					// neither context expiry, nor EOF, close and log
 					f.logger.Error(f.ctx, "failed to query logs", slog.Error(err))
-					err = f.conn.Close(websocket.StatusInternalError, err.Error())
+					err = f.conn.Close(websocket.StatusInternalError, httpapi.WebsocketCloseSprintf("%s", err.Error()))
 					if err != nil {
 						f.logger.Warn(f.ctx, "failed to close webscoket", slog.Error(err))
 					}
