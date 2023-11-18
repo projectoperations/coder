@@ -1,6 +1,6 @@
 import {
   DEFAULT_RECORDS_PER_PAGE,
-  nonInitialPage,
+  isNonInitialPage,
 } from "components/PaginationWidget/utils";
 import { useFeatureVisibility } from "hooks/useFeatureVisibility";
 import { FC } from "react";
@@ -11,7 +11,7 @@ import { AuditPageView } from "./AuditPageView";
 import { useUserFilterMenu } from "components/Filter/UserFilter";
 import { useFilter } from "components/Filter/filter";
 import { usePagination } from "hooks";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "react-query";
 import { getAuditLogs } from "api/api";
 import { useActionFilterMenu, useResourceTypeFilterMenu } from "./AuditFilter";
 
@@ -73,7 +73,7 @@ const AuditPage: FC = () => {
         page={pagination.page}
         limit={pagination.limit}
         onPageChange={pagination.goToPage}
-        isNonInitialPage={nonInitialPage(searchParamsResult[0])}
+        isNonInitialPage={isNonInitialPage(searchParamsResult[0])}
         isAuditLogVisible={isAuditLogVisible}
         error={error}
         filterProps={{

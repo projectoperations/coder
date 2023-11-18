@@ -2,7 +2,9 @@ package externalauth_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -18,7 +20,7 @@ import (
 	"github.com/coder/coder/v2/coderd/coderdtest/oidctest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
-	"github.com/coder/coder/v2/coderd/database/dbfake"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/externalauth"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
@@ -43,7 +45,7 @@ func TestRefreshToken(t *testing.T) {
 					return nil, xerrors.New("should not be called")
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 				cfg.NoRefresh = true
 			},
 		})
@@ -74,7 +76,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, nil
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 				cfg.NoRefresh = true
 			},
 		})
@@ -117,7 +119,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, xerrors.New(staticError)
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 			},
 		})
 
@@ -142,7 +144,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, oidctest.StatusError(http.StatusUnauthorized, xerrors.New(staticError))
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 			},
 		})
 
@@ -175,7 +177,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, oidctest.StatusError(http.StatusUnauthorized, xerrors.New(staticError))
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 				cfg.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
 			},
 		})
@@ -205,7 +207,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, nil
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 				cfg.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
 			},
 		})
@@ -222,7 +224,7 @@ func TestRefreshToken(t *testing.T) {
 	t.Run("Updates", func(t *testing.T) {
 		t.Parallel()
 
-		db := dbfake.New()
+		db := dbmem.New()
 		validateCalls := 0
 		refreshCalls := 0
 		fake, config, link := setupOauth2Test(t, testConfig{
@@ -236,7 +238,7 @@ func TestRefreshToken(t *testing.T) {
 					return jwt.MapClaims{}, nil
 				}),
 			},
-			GitConfigOpt: func(cfg *externalauth.Config) {
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
 				cfg.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
 			},
 			DB: db,
@@ -260,6 +262,75 @@ func TestRefreshToken(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, updated.OAuthAccessToken, dbLink.OAuthAccessToken, "token is updated in the DB")
 	})
+
+	t.Run("WithExtra", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbmem.New()
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithMutateToken(func(token map[string]interface{}) {
+					token["authed_user"] = map[string]interface{}{
+						"access_token": token["access_token"],
+					}
+				}),
+			},
+			ExternalAuthOpt: func(cfg *externalauth.Config) {
+				cfg.Type = codersdk.EnhancedExternalAuthProviderSlack.String()
+				cfg.ExtraTokenKeys = []string{"authed_user"}
+				cfg.ValidateURL = ""
+			},
+			DB: db,
+		})
+
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		// Force a refresh
+		link.OAuthExpiry = expired
+
+		updated, ok, err := config.RefreshToken(ctx, db, link)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.True(t, updated.OAuthExtra.Valid)
+		extra := map[string]interface{}{}
+		require.NoError(t, json.Unmarshal(updated.OAuthExtra.RawMessage, &extra))
+		mapping, ok := extra["authed_user"].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, updated.OAuthAccessToken, mapping["access_token"])
+	})
+}
+
+func TestExchangeWithClientSecret(t *testing.T) {
+	t.Parallel()
+	// This ensures a provider that requires the custom
+	// client secret exchange works.
+	configs, err := externalauth.ConvertConfig([]codersdk.ExternalAuthConfig{{
+		// JFrog just happens to require this custom type.
+
+		Type:         codersdk.EnhancedExternalAuthProviderJFrog.String(),
+		ClientID:     "id",
+		ClientSecret: "secret",
+	}}, &url.URL{})
+	require.NoError(t, err)
+	config := configs[0]
+
+	client := &http.Client{
+		Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "Bearer secret", req.Header.Get("Authorization"))
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(http.StatusOK)
+			body, err := json.Marshal(&oauth2.Token{
+				AccessToken: "bananas",
+			})
+			if err != nil {
+				return nil, err
+			}
+			_, err = rec.Write(body)
+			return rec.Result(), err
+		}),
+	}
+
+	_, err = config.Exchange(context.WithValue(context.Background(), oauth2.HTTPClient, client), "code")
+	require.NoError(t, err)
 }
 
 func TestConvertYAML(t *testing.T) {
@@ -344,7 +415,7 @@ func TestConvertYAML(t *testing.T) {
 type testConfig struct {
 	FakeIDPOpts         []oidctest.FakeIDPOpt
 	CoderOIDCConfigOpts []func(cfg *coderd.OIDCConfig)
-	GitConfigOpt        func(cfg *externalauth.Config)
+	ExternalAuthOpt     func(cfg *externalauth.Config)
 	// If DB is passed in, the link will be inserted into the DB.
 	DB database.Store
 }
@@ -367,7 +438,7 @@ func setupOauth2Test(t *testing.T, settings testConfig) (*oidctest.FakeIDP, *ext
 		ID:           providerID,
 		ValidateURL:  fake.WellknownConfig().UserInfoURL,
 	}
-	settings.GitConfigOpt(config)
+	settings.ExternalAuthOpt(config)
 
 	oauthToken, err := fake.GenerateAuthenticatedToken(jwt.MapClaims{
 		"email": "test@coder.com",
@@ -401,4 +472,10 @@ func setupOauth2Test(t *testing.T, settings testConfig) (*oidctest.FakeIDP, *ext
 	}
 
 	return fake, config, link
+}
+
+type roundTripper func(req *http.Request) (*http.Response, error)
+
+func (r roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return r(req)
 }

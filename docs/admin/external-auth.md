@@ -33,7 +33,7 @@ Set the following environment variables to
 
 ```env
 CODER_EXTERNAL_AUTH_0_ID="primary-github"
-CODER_EXTERNAL_AUTH_0_TYPE=github|gitlab|azure-devops|bitbucket|<name of service e.g. jfrog>
+CODER_EXTERNAL_AUTH_0_TYPE=github|gitlab|azure-devops|bitbucket-cloud|bitbucket-server|<name of service e.g. jfrog>
 CODER_EXTERNAL_AUTH_0_CLIENT_ID=xxxxxx
 CODER_EXTERNAL_AUTH_0_CLIENT_SECRET=xxxxxxx
 
@@ -70,12 +70,28 @@ CODER_EXTERNAL_AUTH_0_DISPLAY_ICON="https://mycustomicon.com/google.svg"
 
 ### GitHub Enterprise
 
-GitHub Enterprise requires the following authentication and token URLs:
+GitHub Enterprise requires the following environment variables:
 
 ```env
+CODER_EXTERNAL_AUTH_0_ID="primary-github"
+CODER_EXTERNAL_AUTH_0_TYPE=github-enterprise
+CODER_EXTERNAL_AUTH_0_CLIENT_ID=xxxxxx
+CODER_EXTERNAL_AUTH_0_CLIENT_SECRET=xxxxxxx
 CODER_EXTERNAL_AUTH_0_VALIDATE_URL="https://github.example.com/api/v3/user"
 CODER_EXTERNAL_AUTH_0_AUTH_URL="https://github.example.com/login/oauth/authorize"
 CODER_EXTERNAL_AUTH_0_TOKEN_URL="https://github.example.com/login/oauth/access_token"
+```
+
+### Bitbucket Server
+
+Bitbucket Server requires the following environment variables:
+
+```env
+CODER_EXTERNAL_AUTH_0_TYPE="bitbucket-server"
+CODER_EXTERNAL_AUTH_0_ID=bitbucket
+CODER_EXTERNAL_AUTH_0_CLIENT_ID=xxx
+CODER_EXTERNAL_AUTH_0_CLIENT_SECRET=xxx
+CODER_EXTERNAL_AUTH_0_AUTH_URL=https://bitbucket.domain.com/rest/oauth2/latest/authorize
 ```
 
 ### Azure DevOps
@@ -101,7 +117,10 @@ provider deployments.
 CODER_EXTERNAL_AUTH_0_AUTH_URL="https://github.example.com/oauth/authorize"
 CODER_EXTERNAL_AUTH_0_TOKEN_URL="https://github.example.com/oauth/token"
 CODER_EXTERNAL_AUTH_0_VALIDATE_URL="https://your-domain.com/oauth/token/info"
+CODER_EXTERNAL_AUTH_0_REGEX=github\.company\.org
 ```
+
+> Note: The `REGEX` variable must be set if using a custom git domain.
 
 ### Custom scopes
 
@@ -114,9 +133,7 @@ CODER_EXTERNAL_AUTH_0_SCOPES="repo:read repo:write write:gpg_key"
 ### Multiple External Providers (enterprise)
 
 Multiple providers are an Enterprise feature. [Learn more](../enterprise.md).
-
-A custom regex can be used to match a specific repository or organization to
-limit auth scope. Here's a sample config:
+Below is an example configuration with multiple providers.
 
 ```env
 # Provider 1) github.com
@@ -157,8 +174,8 @@ The following example will require users authenticate via GitHub and auto-clone
 a repo into the `~/coder` directory.
 
 ```hcl
-data "coder_git_auth" "github" {
-  # Matches the ID of the git auth provider in Coder.
+data "coder_external_auth" "github" {
+  # Matches the ID of the external auth provider in Coder.
   id = "github"
 }
 
@@ -167,7 +184,7 @@ resource "coder_agent" "dev" {
   arch = "amd64"
   dir  = "~/coder"
   env = {
-    GITHUB_TOKEN : data.coder_git_auth.github.access_token
+    GITHUB_TOKEN : data.coder_external_auth.github.access_token
   }
   startup_script = <<EOF
 if [ ! -d ~/coder ]; then

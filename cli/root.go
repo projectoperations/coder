@@ -30,7 +30,6 @@ import (
 
 	"github.com/coder/pretty"
 
-	"cdr.dev/slog"
 	"github.com/coder/coder/v2/buildinfo"
 	"github.com/coder/coder/v2/cli/clibase"
 	"github.com/coder/coder/v2/cli/cliui"
@@ -55,6 +54,7 @@ const (
 	varURL              = "url"
 	varToken            = "token"
 	varAgentToken       = "agent-token"
+	varAgentTokenFile   = "agent-token-file"
 	varAgentURL         = "agent-url"
 	varHeader           = "header"
 	varHeaderCommand    = "header-command"
@@ -71,7 +71,9 @@ const (
 	envSessionToken     = "CODER_SESSION_TOKEN"
 	//nolint:gosec
 	envAgentToken = "CODER_AGENT_TOKEN"
-	envURL        = "CODER_URL"
+	//nolint:gosec
+	envAgentTokenFile = "CODER_AGENT_TOKEN_FILE"
+	envURL            = "CODER_URL"
 )
 
 var errUnauthenticated = xerrors.New(notLoggedInMessage)
@@ -80,6 +82,7 @@ func (r *RootCmd) Core() []*clibase.Cmd {
 	// Please re-sort this list alphabetically if you change it!
 	return []*clibase.Cmd{
 		r.dotfiles(),
+		r.externalAuth(),
 		r.login(),
 		r.logout(),
 		r.netcheck(),
@@ -93,6 +96,7 @@ func (r *RootCmd) Core() []*clibase.Cmd {
 		r.version(defaultVersionInfo),
 
 		// Workspace Commands
+		r.autoupdate(),
 		r.configSSH(),
 		r.create(),
 		r.deleteWorkspace(),
@@ -329,6 +333,14 @@ func (r *RootCmd) Command(subcommands []*clibase.Cmd) (*clibase.Cmd, error) {
 			Group:       globalGroup,
 		},
 		{
+			Flag:        varAgentTokenFile,
+			Env:         envAgentTokenFile,
+			Description: "A file containing an agent authentication token.",
+			Value:       clibase.StringOf(&r.agentTokenFile),
+			Hidden:      true,
+			Group:       globalGroup,
+		},
+		{
 			Flag:        varAgentURL,
 			Env:         "CODER_AGENT_URL",
 			Description: "URL for an agent to access your deployment.",
@@ -429,36 +441,22 @@ func (r *RootCmd) Command(subcommands []*clibase.Cmd) (*clibase.Cmd, error) {
 	return cmd, nil
 }
 
-type contextKey int
-
-const (
-	contextKeyLogger contextKey = iota
-)
-
-func ContextWithLogger(ctx context.Context, l slog.Logger) context.Context {
-	return context.WithValue(ctx, contextKeyLogger, l)
-}
-
-func LoggerFromContext(ctx context.Context) (slog.Logger, bool) {
-	l, ok := ctx.Value(contextKeyLogger).(slog.Logger)
-	return l, ok
-}
-
 // RootCmd contains parameters and helpers useful to all commands.
 type RootCmd struct {
-	clientURL     *url.URL
-	token         string
-	globalConfig  string
-	header        []string
-	headerCommand string
-	agentToken    string
-	agentURL      *url.URL
-	forceTTY      bool
-	noOpen        bool
-	verbose       bool
-	versionFlag   bool
-	disableDirect bool
-	debugHTTP     bool
+	clientURL      *url.URL
+	token          string
+	globalConfig   string
+	header         []string
+	headerCommand  string
+	agentToken     string
+	agentTokenFile string
+	agentURL       *url.URL
+	forceTTY       bool
+	noOpen         bool
+	verbose        bool
+	versionFlag    bool
+	disableDirect  bool
+	debugHTTP      bool
 
 	noVersionCheck   bool
 	noFeatureWarning bool
@@ -823,10 +821,18 @@ func (r *RootCmd) checkWarnings(i *clibase.Invocation, client *codersdk.Client) 
 	ctx, cancel := context.WithTimeout(i.Context(), 10*time.Second)
 	defer cancel()
 
+	user, err := client.User(ctx, codersdk.Me)
+	if err != nil {
+		return xerrors.Errorf("get user me: %w", err)
+	}
+
 	entitlements, err := client.Entitlements(ctx)
 	if err == nil {
-		for _, w := range entitlements.Warnings {
-			_, _ = fmt.Fprintln(i.Stderr, pretty.Sprint(cliui.DefaultStyles.Warn, w))
+		// Don't show warning to regular users.
+		if len(user.Roles) > 0 {
+			for _, w := range entitlements.Warnings {
+				_, _ = fmt.Fprintln(i.Stderr, pretty.Sprint(cliui.DefaultStyles.Warn, w))
+			}
 		}
 	}
 	return nil

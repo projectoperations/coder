@@ -15,8 +15,15 @@ import {
   useFilter,
 } from "components/Filter/filter";
 import { UserFilterMenu, UserMenu } from "components/Filter/UserFilter";
-import { workspaceFilterQuery } from "utils/filters";
 import { docs } from "utils/docs";
+
+export const workspaceFilterQuery = {
+  me: "owner:me",
+  all: "",
+  running: "status:running",
+  failed: "status:failed",
+  dormant: "is-dormant:true",
+};
 
 type FilterPreset = {
   query: string;
@@ -69,7 +76,7 @@ export const WorkspacesFilter = ({
   menus,
 }: WorkspaceFilterProps) => {
   const actionsEnabled = useIsWorkspaceActionsEnabled();
-  const presets = actionsEnabled ? PRESET_FILTERS : PRESETS_WITH_DORMANT;
+  const presets = actionsEnabled ? PRESETS_WITH_DORMANT : PRESET_FILTERS;
 
   return (
     <Filter
@@ -182,14 +189,19 @@ const StatusOptionItem = ({
 };
 
 const StatusIndicator: FC<{ option: StatusOption }> = ({ option }) => {
+  const color = option.color === "notice" ? "warning" : option.color;
+
   return (
     <Box
       height={8}
       width={8}
       borderRadius={9999}
-      sx={{
-        backgroundColor: (theme) =>
-          (theme.palette[option.color as keyof Palette] as PaletteColor).light,
+      css={(theme) => {
+        return {
+          backgroundColor: (
+            theme.palette[color as keyof Palette] as PaletteColor
+          ).light,
+        };
       }}
     />
   );

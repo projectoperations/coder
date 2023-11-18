@@ -50,6 +50,7 @@ const (
 	FeatureExternalTokenEncryption     FeatureName = "external_token_encryption"
 	FeatureTemplateAutostopRequirement FeatureName = "template_autostop_requirement"
 	FeatureWorkspaceBatchActions       FeatureName = "workspace_batch_actions"
+	FeatureAccessControl               FeatureName = "access_control"
 )
 
 // FeatureNames must be kept in-sync with the Feature enum above.
@@ -70,6 +71,7 @@ var FeatureNames = []FeatureName{
 	FeatureExternalTokenEncryption,
 	FeatureTemplateAutostopRequirement,
 	FeatureWorkspaceBatchActions,
+	FeatureAccessControl,
 }
 
 // Humanize returns the feature name in a human-readable format.
@@ -180,6 +182,8 @@ type DeploymentValues struct {
 	ProxyHealthStatusInterval       clibase.Duration                     `json:"proxy_health_status_interval,omitempty" typescript:",notnull"`
 	EnableTerraformDebugMode        clibase.Bool                         `json:"enable_terraform_debug_mode,omitempty" typescript:",notnull"`
 	UserQuietHoursSchedule          UserQuietHoursScheduleConfig         `json:"user_quiet_hours_schedule,omitempty" typescript:",notnull"`
+	WebTerminalRenderer             clibase.String                       `json:"web_terminal_renderer,omitempty" typescript:",notnull"`
+	Healthcheck                     HealthcheckConfig                    `json:"healthcheck,omitempty" typescript:",notnull"`
 
 	Config      clibase.YAMLConfigPath `json:"config,omitempty" typescript:",notnull"`
 	WriteConfig clibase.Bool           `json:"write_config,omitempty" typescript:",notnull"`
@@ -302,16 +306,18 @@ type TelemetryConfig struct {
 }
 
 type TLSConfig struct {
-	Enable         clibase.Bool        `json:"enable" typescript:",notnull"`
-	Address        clibase.HostPort    `json:"address" typescript:",notnull"`
-	RedirectHTTP   clibase.Bool        `json:"redirect_http" typescript:",notnull"`
-	CertFiles      clibase.StringArray `json:"cert_file" typescript:",notnull"`
-	ClientAuth     clibase.String      `json:"client_auth" typescript:",notnull"`
-	ClientCAFile   clibase.String      `json:"client_ca_file" typescript:",notnull"`
-	KeyFiles       clibase.StringArray `json:"key_file" typescript:",notnull"`
-	MinVersion     clibase.String      `json:"min_version" typescript:",notnull"`
-	ClientCertFile clibase.String      `json:"client_cert_file" typescript:",notnull"`
-	ClientKeyFile  clibase.String      `json:"client_key_file" typescript:",notnull"`
+	Enable               clibase.Bool        `json:"enable" typescript:",notnull"`
+	Address              clibase.HostPort    `json:"address" typescript:",notnull"`
+	RedirectHTTP         clibase.Bool        `json:"redirect_http" typescript:",notnull"`
+	CertFiles            clibase.StringArray `json:"cert_file" typescript:",notnull"`
+	ClientAuth           clibase.String      `json:"client_auth" typescript:",notnull"`
+	ClientCAFile         clibase.String      `json:"client_ca_file" typescript:",notnull"`
+	KeyFiles             clibase.StringArray `json:"key_file" typescript:",notnull"`
+	MinVersion           clibase.String      `json:"min_version" typescript:",notnull"`
+	ClientCertFile       clibase.String      `json:"client_cert_file" typescript:",notnull"`
+	ClientKeyFile        clibase.String      `json:"client_key_file" typescript:",notnull"`
+	SupportedCiphers     clibase.StringArray `json:"supported_ciphers" typescript:",notnull"`
+	AllowInsecureCiphers clibase.Bool        `json:"allow_insecure_ciphers" typescript:",notnull"`
 }
 
 type TraceConfig struct {
@@ -336,6 +342,7 @@ type ExternalAuthConfig struct {
 	AppInstallationsURL string   `json:"app_installations_url"`
 	NoRefresh           bool     `json:"no_refresh"`
 	Scopes              []string `json:"scopes"`
+	ExtraTokenKeys      []string `json:"extra_token_keys"`
 	DeviceFlow          bool     `json:"device_flow"`
 	DeviceCodeURL       string   `json:"device_code_url"`
 	// Regex allows API requesters to match an auth config by
@@ -389,9 +396,16 @@ type UserQuietHoursScheduleConfig struct {
 	// WindowDuration  clibase.Duration `json:"window_duration" typescript:",notnull"`
 }
 
+// HealthcheckConfig contains configuration for healthchecks.
+type HealthcheckConfig struct {
+	Refresh           clibase.Duration `json:"refresh" typescript:",notnull"`
+	ThresholdDatabase clibase.Duration `json:"threshold_database" typescript:",notnull"`
+}
+
 const (
-	annotationEnterpriseKey = "enterprise"
-	annotationSecretKey     = "secret"
+	annotationFormatDuration = "format_duration"
+	annotationEnterpriseKey  = "enterprise"
+	annotationSecretKey      = "secret"
 	// annotationExternalProxies is used to mark options that are used by workspace
 	// proxies. This is used to filter out options that are not relevant.
 	annotationExternalProxies = "external_workspace_proxies"
@@ -482,6 +496,11 @@ func (c *DeploymentValues) Options() clibase.OptionSet {
 			Parent: &deploymentGroupIntrospection,
 			Name:   "Logging",
 			YAML:   "logging",
+		}
+		deploymentGroupIntrospectionHealthcheck = clibase.Group{
+			Parent: &deploymentGroupIntrospection,
+			Name:   "Health Check",
+			YAML:   "healthcheck",
 		}
 		deploymentGroupOAuth2 = clibase.Group{
 			Name:        "OAuth2",
@@ -612,6 +631,7 @@ when required by your organization's security policy.`,
 			Default:     time.Minute.String(),
 			Value:       &c.AutobuildPollInterval,
 			YAML:        "autobuildPollInterval",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Job Hang Detector Interval",
@@ -622,6 +642,7 @@ when required by your organization's security policy.`,
 			Default:     time.Minute.String(),
 			Value:       &c.JobHangDetectorInterval,
 			YAML:        "jobHangDetectorInterval",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		httpAddress,
 		tlsBindAddress,
@@ -734,6 +755,28 @@ when required by your organization's security policy.`,
 			Value:       &c.TLS.ClientKeyFile,
 			Group:       &deploymentGroupNetworkingTLS,
 			YAML:        "clientKeyFile",
+			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
+		},
+		{
+			Name:        "TLS Ciphers",
+			Description: "Specify specific TLS ciphers that allowed to be used. See https://github.com/golang/go/blob/master/src/crypto/tls/cipher_suites.go#L53-L75.",
+			Flag:        "tls-ciphers",
+			Env:         "CODER_TLS_CIPHERS",
+			Default:     "",
+			Value:       &c.TLS.SupportedCiphers,
+			Group:       &deploymentGroupNetworkingTLS,
+			YAML:        "tlsCiphers",
+			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
+		},
+		{
+			Name:        "TLS Allow Insecure Ciphers",
+			Description: "By default, only ciphers marked as 'secure' are allowed to be used. See https://github.com/golang/go/blob/master/src/crypto/tls/cipher_suites.go#L82-L95.",
+			Flag:        "tls-allow-insecure-ciphers",
+			Env:         "CODER_TLS_ALLOW_INSECURE_CIPHERS",
+			Default:     "false",
+			Value:       &c.TLS.AllowInsecureCiphers,
+			Group:       &deploymentGroupNetworkingTLS,
+			YAML:        "tlsAllowInsecureCiphers",
 			Annotations: clibase.Annotations{}.Mark(annotationExternalProxies, "true"),
 		},
 		// Derp settings
@@ -1293,6 +1336,7 @@ when required by your organization's security policy.`,
 			Value:       &c.Provisioner.DaemonPollInterval,
 			Group:       &deploymentGroupProvisioning,
 			YAML:        "daemonPollInterval",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Poll Jitter",
@@ -1303,6 +1347,7 @@ when required by your organization's security policy.`,
 			Value:       &c.Provisioner.DaemonPollJitter,
 			Group:       &deploymentGroupProvisioning,
 			YAML:        "daemonPollJitter",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Force Cancel Interval",
@@ -1313,6 +1358,7 @@ when required by your organization's security policy.`,
 			Value:       &c.Provisioner.ForceCancelInterval,
 			Group:       &deploymentGroupProvisioning,
 			YAML:        "forceCancelInterval",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Provisioner Daemon Pre-shared Key (PSK)",
@@ -1462,10 +1508,11 @@ when required by your organization's security policy.`,
 			// The default value is essentially "forever", so just use 100 years.
 			// We have to add in the 25 leap days for the frontend to show the
 			// "100 years" correctly.
-			Default: ((100 * 365 * time.Hour * 24) + (25 * time.Hour * 24)).String(),
-			Value:   &c.MaxTokenLifetime,
-			Group:   &deploymentGroupNetworkingHTTP,
-			YAML:    "maxTokenLifetime",
+			Default:     ((100 * 365 * time.Hour * 24) + (25 * time.Hour * 24)).String(),
+			Value:       &c.MaxTokenLifetime,
+			Group:       &deploymentGroupNetworkingHTTP,
+			YAML:        "maxTokenLifetime",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Enable swagger endpoint",
@@ -1573,6 +1620,7 @@ when required by your organization's security policy.`,
 			Hidden:      true,
 			Default:     time.Hour.String(),
 			Value:       &c.MetricsCacheRefreshInterval,
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Agent Stat Refresh Interval",
@@ -1582,6 +1630,7 @@ when required by your organization's security policy.`,
 			Hidden:      true,
 			Default:     (30 * time.Second).String(),
 			Value:       &c.AgentStatRefreshInterval,
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Agent Fallback Troubleshooting URL",
@@ -1648,6 +1697,7 @@ when required by your organization's security policy.`,
 			Value:       &c.SessionDuration,
 			Group:       &deploymentGroupNetworkingHTTP,
 			YAML:        "sessionDuration",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Disable Session Expiry Refresh",
@@ -1750,6 +1800,7 @@ Write out the current server config as YAML to stdout.`,
 			Value:       &c.ProxyHealthStatusInterval,
 			Group:       &deploymentGroupNetworkingHTTP,
 			YAML:        "proxyHealthInterval",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
 		},
 		{
 			Name:        "Default Quiet Hours Schedule",
@@ -1761,7 +1812,41 @@ Write out the current server config as YAML to stdout.`,
 			Group:       &deploymentGroupUserQuietHoursSchedule,
 			YAML:        "defaultQuietHoursSchedule",
 		},
+		{
+			Name:        "Web Terminal Renderer",
+			Description: "The renderer to use when opening a web terminal. Valid values are 'canvas', 'webgl', or 'dom'.",
+			Flag:        "web-terminal-renderer",
+			Env:         "CODER_WEB_TERMINAL_RENDERER",
+			Default:     "canvas",
+			Value:       &c.WebTerminalRenderer,
+			Group:       &deploymentGroupClient,
+			YAML:        "webTerminalRenderer",
+		},
+		// Healthcheck Options
+		{
+			Name:        "Health Check Refresh",
+			Description: "Refresh interval for healthchecks.",
+			Flag:        "health-check-refresh",
+			Env:         "CODER_HEALTH_CHECK_REFRESH",
+			Default:     (10 * time.Minute).String(),
+			Value:       &c.Healthcheck.Refresh,
+			Group:       &deploymentGroupIntrospectionHealthcheck,
+			YAML:        "refresh",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
+		},
+		{
+			Name:        "Health Check Threshold: Database",
+			Description: "The threshold for the database health check. If the median latency of the database exceeds this threshold over 5 attempts, the database is considered unhealthy. The default value is 15ms.",
+			Flag:        "health-check-threshold-database",
+			Env:         "CODER_HEALTH_CHECK_THRESHOLD_DATABASE",
+			Default:     (15 * time.Millisecond).String(),
+			Value:       &c.Healthcheck.ThresholdDatabase,
+			Group:       &deploymentGroupIntrospectionHealthcheck,
+			YAML:        "thresholdDatabase",
+			Annotations: clibase.Annotations{}.Mark(annotationFormatDuration, "true"),
+		},
 	}
+
 	return opts
 }
 
@@ -1968,7 +2053,6 @@ const (
 	// ExperimentSingleTailnet replaces workspace connections inside coderd to
 	// all use a single tailnet, instead of the previous behavior of creating a
 	// single tailnet for each agent.
-	// WARNING: This cannot be enabled when using HA.
 	ExperimentSingleTailnet Experiment = "single_tailnet"
 
 	// ExperimentTemplateAutostopRequirement allows template admins to have more
@@ -1988,6 +2072,10 @@ const (
 	// Deployment health page
 	ExperimentDeploymentHealthPage Experiment = "deployment_health_page"
 
+	// ExperimentDashboardTheme mutates the dashboard to use a new, dark color scheme.
+	ExperimentDashboardTheme Experiment = "dashboard_theme"
+
+	ExperimentTemplateUpdatePolicies Experiment = "template_update_policies"
 	// Add new experiments here!
 	// ExperimentExample Experiment = "example"
 )
@@ -1998,14 +2086,16 @@ const (
 // not be included here and will be essentially hidden.
 var ExperimentsAll = Experiments{
 	ExperimentDeploymentHealthPage,
+	ExperimentSingleTailnet,
 }
 
-// Experiments is a list of experiments that are enabled for the deployment.
+// Experiments is a list of experiments.
 // Multiple experiments may be enabled at the same time.
 // Experiments are not safe for production use, and are not guaranteed to
 // be backwards compatible. They may be removed or renamed at any time.
 type Experiments []Experiment
 
+// Returns a list of experiments that are enabled for the deployment.
 func (e Experiments) Enabled(ex Experiment) bool {
 	for _, v := range e {
 		if v == ex {
@@ -2025,6 +2115,25 @@ func (c *Client) Experiments(ctx context.Context) (Experiments, error) {
 		return nil, ReadBodyAsError(res)
 	}
 	var exp []Experiment
+	return exp, json.NewDecoder(res.Body).Decode(&exp)
+}
+
+// AvailableExperiments is an expandable type that returns all safe experiments
+// available to be used with a deployment.
+type AvailableExperiments struct {
+	Safe []Experiment `json:"safe"`
+}
+
+func (c *Client) SafeExperiments(ctx context.Context) (AvailableExperiments, error) {
+	res, err := c.Request(ctx, http.MethodGet, "/api/v2/experiments/available", nil)
+	if err != nil {
+		return AvailableExperiments{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return AvailableExperiments{}, ReadBodyAsError(res)
+	}
+	var exp AvailableExperiments
 	return exp, json.NewDecoder(res.Body).Decode(&exp)
 }
 

@@ -1,7 +1,9 @@
 import axios from "axios";
 import dayjs from "dayjs";
 import * as TypesGen from "./typesGenerated";
-import { delay } from "utils/delay";
+// This needs to include the `../`, otherwise it breaks when importing into
+// vscode-coder.
+import { delay } from "../utils/delay";
 import userAgentParser from "ua-parser-js";
 
 // Adds 304 for the default axios validateStatus function
@@ -118,19 +120,9 @@ export const logout = async (): Promise<void> => {
   await axios.post("/api/v2/users/logout");
 };
 
-export const getAuthenticatedUser = async (): Promise<
-  TypesGen.User | undefined
-> => {
-  try {
-    const response = await axios.get<TypesGen.User>("/api/v2/users/me");
-    return response.data;
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      return undefined;
-    }
-
-    throw error;
-  }
+export const getAuthenticatedUser = async () => {
+  const response = await axios.get<TypesGen.User>("/api/v2/users/me");
+  return response.data;
 };
 
 export const getAuthMethods = async (): Promise<TypesGen.AuthMethods> => {
@@ -385,6 +377,20 @@ export const patchTemplateVersion = async (
   return response.data;
 };
 
+export const archiveTemplateVersion = async (templateVersionId: string) => {
+  const response = await axios.post<TypesGen.TemplateVersion>(
+    `/api/v2/templateversions/${templateVersionId}/archive`,
+  );
+  return response.data;
+};
+
+export const unarchiveTemplateVersion = async (templateVersionId: string) => {
+  const response = await axios.post<TypesGen.TemplateVersion>(
+    `/api/v2/templateversions/${templateVersionId}/unarchive`,
+  );
+  return response.data;
+};
+
 export const updateTemplateMeta = async (
   templateId: string,
   data: TypesGen.UpdateTemplateMeta,
@@ -519,7 +525,7 @@ export const postWorkspaceBuild = async (
 export const startWorkspace = (
   workspaceId: string,
   templateVersionId: string,
-  logLevel?: TypesGen.CreateWorkspaceBuildRequest["log_level"],
+  logLevel?: TypesGen.ProvisionerLogLevel,
   buildParameters?: TypesGen.WorkspaceBuildParameter[],
 ) =>
   postWorkspaceBuild(workspaceId, {
@@ -530,20 +536,25 @@ export const startWorkspace = (
   });
 export const stopWorkspace = (
   workspaceId: string,
-  logLevel?: TypesGen.CreateWorkspaceBuildRequest["log_level"],
+  logLevel?: TypesGen.ProvisionerLogLevel,
 ) =>
   postWorkspaceBuild(workspaceId, {
     transition: "stop",
     log_level: logLevel,
   });
 
+export type DeleteWorkspaceOptions = Pick<
+  TypesGen.CreateWorkspaceBuildRequest,
+  "log_level" & "orphan"
+>;
+
 export const deleteWorkspace = (
   workspaceId: string,
-  logLevel?: TypesGen.CreateWorkspaceBuildRequest["log_level"],
+  options?: DeleteWorkspaceOptions,
 ) =>
   postWorkspaceBuild(workspaceId, {
     transition: "delete",
-    log_level: logLevel,
+    ...options,
   });
 
 export const cancelWorkspaceBuild = async (
@@ -566,6 +577,21 @@ export const updateWorkspaceDormancy = async (
   const response = await axios.put(
     `/api/v2/workspaces/${workspaceId}/dormant`,
     data,
+  );
+  return response.data;
+};
+
+export const updateWorkspaceAutomaticUpdates = async (
+  workspaceId: string,
+  automaticUpdates: TypesGen.AutomaticUpdates,
+): Promise<void> => {
+  const req: TypesGen.UpdateWorkspaceAutomaticUpdatesRequest = {
+    automatic_updates: automaticUpdates,
+  };
+
+  const response = await axios.put(
+    `/api/v2/workspaces/${workspaceId}/autoupdates`,
+    req,
   );
   return response.data;
 };
@@ -775,10 +801,10 @@ export const regenerateUserSSHKey = async (
 
 export const getWorkspaceBuilds = async (
   workspaceId: string,
-  since: Date,
-): Promise<TypesGen.WorkspaceBuild[]> => {
+  req?: TypesGen.WorkspaceBuildsRequest,
+) => {
   const response = await axios.get<TypesGen.WorkspaceBuild[]>(
-    `/api/v2/workspaces/${workspaceId}/builds?since=${since.toISOString()}`,
+    getURLWithSearchParams(`/api/v2/workspaces/${workspaceId}/builds`, req),
   );
   return response.data;
 };
@@ -858,6 +884,19 @@ export const getExperiments = async (): Promise<TypesGen.Experiment[]> => {
   }
 };
 
+export const getAvailableExperiments =
+  async (): Promise<TypesGen.AvailableExperiments> => {
+    try {
+      const response = await axios.get("/api/v2/experiments/available");
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { safe: [] };
+      }
+      throw error;
+    }
+  };
+
 export const getExternalAuthProvider = async (
   provider: string,
 ): Promise<TypesGen.ExternalAuth> => {
@@ -899,8 +938,10 @@ export const getTemplateDAUs = async (
 };
 
 export const getDeploymentDAUs = async (
-  // Default to user's local timezone
-  offset = new Date().getTimezoneOffset() / 60,
+  // Default to user's local timezone.
+  // As /api/v2/insights/daus only accepts whole-number values for tz_offset
+  // we truncate the tz offset down to the closest hour.
+  offset = Math.trunc(new Date().getTimezoneOffset() / 60),
 ): Promise<TypesGen.DAUsResponse> => {
   const response = await axios.get(`/api/v2/insights/daus?tz_offset=${offset}`);
   return response.data;
@@ -928,7 +969,7 @@ export const getTemplateACL = async (
 export const updateTemplateACL = async (
   templateId: string,
   data: TypesGen.UpdateTemplateACL,
-): Promise<TypesGen.TemplateACL> => {
+): Promise<{ message: string }> => {
   const response = await axios.patch(
     `/api/v2/templates/${templateId}/acl`,
     data,
@@ -1102,7 +1143,7 @@ export const getTemplateExamples = async (
   return response.data;
 };
 
-export const uploadTemplateFile = async (
+export const uploadFile = async (
   file: File,
 ): Promise<TypesGen.UploadResponse> => {
   const response = await axios.post("/api/v2/files", file, {
@@ -1171,10 +1212,15 @@ export const removeLicense = async (licenseId: number): Promise<void> => {
 
 export class MissingBuildParameters extends Error {
   parameters: TypesGen.TemplateVersionParameter[] = [];
+  versionId: string;
 
-  constructor(parameters: TypesGen.TemplateVersionParameter[]) {
+  constructor(
+    parameters: TypesGen.TemplateVersionParameter[],
+    versionId: string,
+  ) {
     super("Missing build parameters.");
     this.parameters = parameters;
+    this.versionId = versionId;
   }
 }
 
@@ -1203,7 +1249,7 @@ export const changeWorkspaceVersion = async (
   );
 
   if (missingParameters.length > 0) {
-    throw new MissingBuildParameters(missingParameters);
+    throw new MissingBuildParameters(missingParameters, templateVersionId);
   }
 
   return postWorkspaceBuild(workspace.id, {
@@ -1241,7 +1287,7 @@ export const updateWorkspace = async (
   );
 
   if (missingParameters.length > 0) {
-    throw new MissingBuildParameters(missingParameters);
+    throw new MissingBuildParameters(missingParameters, activeVersionId);
   }
 
   return postWorkspaceBuild(workspace.id, {
@@ -1249,6 +1295,15 @@ export const updateWorkspace = async (
     template_version_id: activeVersionId,
     rich_parameter_values: newBuildParameters,
   });
+};
+
+export const getWorkspaceResolveAutostart = async (
+  workspaceId: string,
+): Promise<TypesGen.ResolveAutostartResponse> => {
+  const response = await axios.get(
+    `/api/v2/workspaces/${workspaceId}/resolve-autostart`,
+  );
+  return response.data;
 };
 
 const getMissingParameters = (
@@ -1510,14 +1565,10 @@ export const getInsightsTemplate = async (
   return response.data;
 };
 
-export const getHealth = () => {
-  return axios.get<{
-    healthy: boolean;
-    time: string;
-    coder_version: string;
-    derp: { healthy: boolean };
-    access_url: { healthy: boolean };
-    websocket: { healthy: boolean };
-    database: { healthy: boolean };
-  }>("/api/v2/debug/health");
+export const getHealth = async (force: boolean = false) => {
+  const params = new URLSearchParams({ force: force.toString() });
+  const response = await axios.get<TypesGen.HealthcheckReport>(
+    `/api/v2/debug/health?${params}`,
+  );
+  return response.data;
 };

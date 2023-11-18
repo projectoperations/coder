@@ -10,7 +10,7 @@ import {
 import { CreateWorkspacePageView } from "./CreateWorkspacePageView";
 
 const meta: Meta<typeof CreateWorkspacePageView> = {
-  title: "pages/CreateWorkspacePageView",
+  title: "pages/CreateWorkspacePage",
   component: CreateWorkspacePageView,
   args: {
     defaultName: "",
@@ -19,6 +19,7 @@ const meta: Meta<typeof CreateWorkspacePageView> = {
     template: MockTemplate,
     parameters: [],
     externalAuth: [],
+    mode: "form",
     permissions: {
       createWorkspaceForUser: true,
     },

@@ -1,34 +1,33 @@
+import { type Interpolation, type Theme } from "@emotion/react";
 import Button from "@mui/material/Button";
-import { makeStyles } from "@mui/styles";
-import { Avatar } from "components/Avatar/Avatar";
-import { AgentRow } from "components/Resources/AgentRow";
-import {
-  ActiveTransition,
-  WorkspaceBuildProgress,
-} from "./WorkspaceBuildProgress";
-import { FC, useEffect, useState } from "react";
+import AlertTitle from "@mui/material/AlertTitle";
+import { type FC, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import * as TypesGen from "api/typesGenerated";
+import dayjs from "dayjs";
+import type * as TypesGen from "api/typesGenerated";
 import { Alert, AlertDetail } from "components/Alert/Alert";
-import { BuildsTable } from "./BuildsTable";
 import { Margins } from "components/Margins/Margins";
 import { Resources } from "components/Resources/Resources";
 import { Stack } from "components/Stack/Stack";
-import { WorkspaceActions } from "pages/WorkspacePage/WorkspaceActions/WorkspaceActions";
-import { WorkspaceDeletedBanner } from "./WorkspaceDeletedBanner";
-import { WorkspaceStats } from "./WorkspaceStats";
 import {
   FullWidthPageHeader,
   PageHeaderActions,
   PageHeaderTitle,
   PageHeaderSubtitle,
 } from "components/PageHeader/FullWidthPageHeader";
-import { TemplateVersionWarnings } from "components/TemplateVersionWarnings/TemplateVersionWarnings";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { DormantWorkspaceBanner } from "components/WorkspaceDeletion";
+import { Avatar } from "components/Avatar/Avatar";
+import { AgentRow } from "components/Resources/AgentRow";
 import { useLocalStorage } from "hooks";
-import AlertTitle from "@mui/material/AlertTitle";
-import dayjs from "dayjs";
+import { WorkspaceActions } from "pages/WorkspacePage/WorkspaceActions/WorkspaceActions";
+import {
+  ActiveTransition,
+  WorkspaceBuildProgress,
+} from "./WorkspaceBuildProgress";
+import { BuildsTable } from "./BuildsTable";
+import { WorkspaceDeletedBanner } from "./WorkspaceDeletedBanner";
+import { WorkspaceStats } from "./WorkspaceStats";
 
 export enum WorkspaceErrors {
   GET_BUILDS_ERROR = "getBuildsError",
@@ -55,8 +54,6 @@ export interface WorkspaceProps {
   isRestarting: boolean;
   workspace: TypesGen.Workspace;
   resources?: TypesGen.WorkspaceResource[];
-  builds?: TypesGen.WorkspaceBuild[];
-  templateWarnings?: TypesGen.TemplateVersionWarning[];
   canUpdateWorkspace: boolean;
   updateMessage?: string;
   canRetryDebugMode: boolean;
@@ -70,6 +67,11 @@ export interface WorkspaceProps {
   quotaBudget?: number;
   handleBuildRetry: () => void;
   buildLogs?: React.ReactNode;
+  builds: TypesGen.WorkspaceBuild[] | undefined;
+  onLoadMoreBuilds: () => void;
+  isLoadingMoreBuilds: boolean;
+  hasMoreBuilds: boolean;
+  canAutostart: boolean;
 }
 
 /**
@@ -101,12 +103,13 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
   buildInfo,
   sshPrefix,
   template,
-  quotaBudget,
   handleBuildRetry,
-  templateWarnings,
   buildLogs,
+  onLoadMoreBuilds,
+  isLoadingMoreBuilds,
+  hasMoreBuilds,
+  canAutostart,
 }) => {
-  const styles = useStyles();
   const navigate = useNavigate();
   const serverVersion = buildInfo?.version || "";
   const { saveLocal, getLocal } = useLocalStorage();
@@ -163,6 +166,14 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
       clearTimeout(showTimer);
     };
   }, [workspace, now, showAlertPendingInQueue]);
+
+  const updateRequired =
+    (workspace.template_require_active_version ||
+      workspace.automatic_updates === "always") &&
+    workspace.outdated;
+  const autoStartFailing = workspace.autostart_schedule && !canAutostart;
+  const requiresManualUpdate = updateRequired && autoStartFailing;
+
   return (
     <>
       <FullWidthPageHeader>
@@ -183,7 +194,6 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
 
         <WorkspaceStats
           workspace={workspace}
-          quotaBudget={quotaBudget}
           handleUpdate={handleUpdate}
           canUpdateWorkspace={canUpdateWorkspace}
           maxDeadlineDecrease={scheduleProps.maxDeadlineDecrease}
@@ -213,18 +223,27 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
         )}
       </FullWidthPageHeader>
 
-      <Margins className={styles.content}>
-        <Stack
-          direction="column"
-          className={styles.firstColumnSpacer}
-          spacing={4}
-        >
-          {workspace.outdated && (
-            <Alert severity="info">
-              <AlertTitle>An update is available for your workspace</AlertTitle>
-              {updateMessage && <AlertDetail>{updateMessage}</AlertDetail>}
-            </Alert>
-          )}
+      <Margins css={styles.content}>
+        <Stack direction="column" css={styles.firstColumnSpacer} spacing={4}>
+          {workspace.outdated &&
+            (requiresManualUpdate ? (
+              <Alert severity="warning">
+                <AlertTitle>
+                  Autostart has been disabled for your workspace.
+                </AlertTitle>
+                <AlertDetail>
+                  Autostart is unable to automatically update your workspace.
+                  Manually update your workspace to reenable Autostart.
+                </AlertDetail>
+              </Alert>
+            ) : (
+              <Alert severity="info">
+                <AlertTitle>
+                  An update is available for your workspace
+                </AlertTitle>
+                {updateMessage && <AlertDetail>{updateMessage}</AlertDetail>}
+              </Alert>
+            ))}
           {buildError}
           {cancellationError}
           {workspace.latest_build.status === "running" &&
@@ -270,13 +289,11 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
             onDismiss={() => saveLocal("dismissedWorkspace", workspace.id)}
           />
 
-          <TemplateVersionWarnings warnings={templateWarnings} />
-
           {showAlertPendingInQueue && (
             <Alert severity="info">
               <AlertTitle>Workspace build is pending</AlertTitle>
               <AlertDetail>
-                <div className={styles.alertPendingInQueue}>
+                <div css={styles.alertPendingInQueue}>
                   This workspace build job is waiting for a provisioner to
                   become available. If you have been waiting for an extended
                   period of time, please contact your administrator for
@@ -345,7 +362,12 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
               error={workspaceErrors[WorkspaceErrors.GET_BUILDS_ERROR]}
             />
           ) : (
-            <BuildsTable builds={builds} />
+            <BuildsTable
+              builds={builds}
+              onLoadMoreBuilds={onLoadMoreBuilds}
+              isLoadingMoreBuilds={isLoadingMoreBuilds}
+              hasMoreBuilds={hasMoreBuilds}
+            />
           )}
         </Stack>
       </Margins>
@@ -353,58 +375,22 @@ export const Workspace: FC<React.PropsWithChildren<WorkspaceProps>> = ({
   );
 };
 
-const spacerWidth = 300;
+const styles = {
+  content: {
+    marginTop: 32,
+  },
 
-export const useStyles = makeStyles((theme) => {
-  return {
-    content: {
-      marginTop: theme.spacing(4),
+  actions: (theme) => ({
+    [theme.breakpoints.down("md")]: {
+      flexDirection: "column",
     },
+  }),
 
-    statusBadge: {
-      marginLeft: theme.spacing(2),
-    },
+  firstColumnSpacer: {
+    flex: 2,
+  },
 
-    actions: {
-      [theme.breakpoints.down("md")]: {
-        flexDirection: "column",
-      },
-    },
-
-    firstColumnSpacer: {
-      flex: 2,
-    },
-
-    secondColumnSpacer: {
-      flex: `0 0 ${spacerWidth}px`,
-    },
-
-    layout: {
-      alignItems: "flex-start",
-    },
-
-    main: {
-      width: "100%",
-    },
-
-    timelineContents: {
-      margin: 0,
-    },
-    logs: {
-      border: `1px solid ${theme.palette.divider}`,
-    },
-
-    errorDetails: {
-      color: theme.palette.text.secondary,
-      fontSize: 12,
-    },
-
-    fullWidth: {
-      width: "100%",
-    },
-
-    alertPendingInQueue: {
-      marginBottom: 12,
-    },
-  };
-});
+  alertPendingInQueue: {
+    marginBottom: 12,
+  },
+} satisfies Record<string, Interpolation<Theme>>;

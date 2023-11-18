@@ -1,5 +1,6 @@
+import { type Interpolation, type Theme } from "@emotion/react";
 import Box from "@mui/material/Box";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getHealth } from "api/api";
 import { Loader } from "components/Loader/Loader";
 import { useTab } from "hooks";
@@ -16,9 +17,12 @@ import {
   PageHeaderSubtitle,
 } from "components/PageHeader/FullWidthPageHeader";
 import { Stats, StatsItem } from "components/Stats/Stats";
-import { makeStyles } from "@mui/styles";
 import { createDayString } from "utils/createDayString";
 import { DashboardFullPage } from "components/Dashboard/DashboardLayout";
+import { LoadingButton } from "@mui/lab";
+import ReplayIcon from "@mui/icons-material/Replay";
+import { FC } from "react";
+import { health, refreshHealth } from "api/queries/debug";
 
 const sections = {
   derp: "DERP",
@@ -29,11 +33,14 @@ const sections = {
 
 export default function HealthPage() {
   const tab = useTab("tab", "derp");
+  const queryClient = useQueryClient();
   const { data: healthStatus } = useQuery({
-    queryKey: ["health"],
-    queryFn: () => getHealth(),
-    refetchInterval: 10_000,
+    ...health(),
+    refetchInterval: 30_000,
   });
+  const { mutate: forceRefresh, isLoading: isRefreshing } = useMutation(
+    refreshHealth(queryClient),
+  );
 
   return (
     <>
@@ -42,7 +49,12 @@ export default function HealthPage() {
       </Helmet>
 
       {healthStatus ? (
-        <HealthPageView healthStatus={healthStatus.data} tab={tab} />
+        <HealthPageView
+          tab={tab}
+          healthStatus={healthStatus}
+          forceRefresh={forceRefresh}
+          isRefreshing={isRefreshing}
+        />
       ) : (
         <Loader />
       )}
@@ -53,12 +65,14 @@ export default function HealthPage() {
 export function HealthPageView({
   healthStatus,
   tab,
+  forceRefresh,
+  isRefreshing,
 }: {
-  healthStatus: Awaited<ReturnType<typeof getHealth>>["data"];
+  healthStatus: Awaited<ReturnType<typeof getHealth>>;
   tab: ReturnType<typeof useTab>;
+  forceRefresh: () => void;
+  isRefreshing: boolean;
 }) {
-  const styles = useStyles();
-
   return (
     <DashboardFullPage>
       <FullWidthPageHeader sticky={false}>
@@ -87,24 +101,33 @@ export function HealthPageView({
             </PageHeaderTitle>
             <PageHeaderSubtitle>
               {healthStatus.healthy
-                ? "All systems operational"
+                ? Object.keys(sections).some(
+                    (key) =>
+                      healthStatus[key as keyof typeof sections].warnings !==
+                        null &&
+                      healthStatus[key as keyof typeof sections].warnings
+                        .length > 0,
+                  )
+                  ? "All systems operational, but performance might be degraded"
+                  : "All systems operational"
                 : "Some issues have been detected"}
             </PageHeaderSubtitle>
           </div>
         </Stack>
 
-        <Stats aria-label="Deployment details" className={styles.stats}>
+        <Stats aria-label="Deployment details" css={styles.stats}>
           <StatsItem
-            className={styles.statsItem}
+            css={styles.statsItem}
             label="Last check"
             value={createDayString(healthStatus.time)}
           />
           <StatsItem
-            className={styles.statsItem}
+            css={styles.statsItem}
             label="Coder version"
             value={healthStatus.coder_version}
           />
         </Stats>
+        <RefreshButton loading={isRefreshing} handleAction={forceRefresh} />
       </FullWidthPageHeader>
       <Box
         sx={{
@@ -116,7 +139,7 @@ export function HealthPageView({
       >
         <Box
           sx={{
-            width: (theme) => theme.spacing(32),
+            width: 256,
             flexShrink: 0,
             borderRight: (theme) => `1px solid ${theme.palette.divider}`,
           }}
@@ -127,7 +150,7 @@ export function HealthPageView({
               textTransform: "uppercase",
               fontWeight: 500,
               color: (theme) => theme.palette.text.secondary,
-              padding: (theme) => theme.spacing(1.5, 3),
+              padding: "12px 24px",
               letterSpacing: "0.5px",
             }}
           >
@@ -139,9 +162,10 @@ export function HealthPageView({
               .map((key) => {
                 const label = sections[key as keyof typeof sections];
                 const isActive = tab.value === key;
-                const isHealthy =
-                  healthStatus[key as keyof typeof sections].healthy;
-
+                const healthSection =
+                  healthStatus[key as keyof typeof sections];
+                const isHealthy = healthSection.healthy;
+                const isWarning = healthSection.warnings?.length > 0;
                 return (
                   <Box
                     component="button"
@@ -159,7 +183,7 @@ export function HealthPageView({
                       gap: 1,
                       textAlign: "left",
                       height: 36,
-                      padding: (theme) => theme.spacing(0, 3),
+                      padding: "0 24px",
                       cursor: "pointer",
                       pointerEvents: isActive ? "none" : "auto",
                       color: (theme) =>
@@ -173,13 +197,23 @@ export function HealthPageView({
                     }}
                   >
                     {isHealthy ? (
-                      <CheckCircleOutlined
-                        sx={{
-                          width: 16,
-                          height: 16,
-                          color: (theme) => theme.palette.success.light,
-                        }}
-                      />
+                      isWarning ? (
+                        <CheckCircleOutlined
+                          sx={{
+                            width: 16,
+                            height: 16,
+                            color: (theme) => theme.palette.warning.main,
+                          }}
+                        />
+                      ) : (
+                        <CheckCircleOutlined
+                          sx={{
+                            width: 16,
+                            height: 16,
+                            color: (theme) => theme.palette.success.light,
+                          }}
+                        />
+                      )
                     ) : (
                       <ErrorOutline
                         sx={{
@@ -196,7 +230,7 @@ export function HealthPageView({
           </Box>
         </Box>
         {/* 62px - navbar and 36px - the bottom bar */}
-        <Box sx={{ overflowY: "auto", width: "100%" }}>
+        <Box sx={{ overflowY: "auto", width: "100%" }} data-chromatic="ignore">
           <SyntaxHighlighter
             language="json"
             editorProps={{ height: "100%" }}
@@ -212,21 +246,21 @@ export function HealthPageView({
   );
 }
 
-const useStyles = makeStyles((theme) => ({
-  stats: {
+const styles = {
+  stats: (theme) => ({
     padding: 0,
     border: 0,
-    gap: theme.spacing(6),
-    rowGap: theme.spacing(3),
+    gap: 48,
+    rowGap: 24,
     flex: 1,
 
     [theme.breakpoints.down("md")]: {
       display: "flex",
       flexDirection: "column",
       alignItems: "flex-start",
-      gap: theme.spacing(1),
+      gap: 8,
     },
-  },
+  }),
 
   statsItem: {
     flexDirection: "column",
@@ -238,4 +272,26 @@ const useStyles = makeStyles((theme) => ({
       fontWeight: 500,
     },
   },
-}));
+} satisfies Record<string, Interpolation<Theme>>;
+
+interface HealthcheckAction {
+  handleAction: () => void;
+  loading: boolean;
+}
+
+export const RefreshButton: FC<HealthcheckAction> = ({
+  handleAction,
+  loading,
+}) => {
+  return (
+    <LoadingButton
+      loading={loading}
+      loadingPosition="start"
+      data-testid="healthcheck-refresh-button"
+      startIcon={<ReplayIcon />}
+      onClick={handleAction}
+    >
+      Refresh
+    </LoadingButton>
+  );
+};

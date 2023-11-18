@@ -17,7 +17,7 @@ const MockedAppearance = {
 };
 
 const meta: Meta<typeof Workspace> = {
-  title: "components/Workspace",
+  title: "pages/WorkspacePage/Workspace",
   component: Workspace,
   decorators: [
     (Story) => (
@@ -209,6 +209,14 @@ export const Outdated: Story = {
   args: {
     ...Running.args,
     workspace: Mocks.MockOutdatedWorkspace,
+  },
+};
+
+export const CantAutostart: Story = {
+  args: {
+    ...Running.args,
+    canAutostart: false,
+    workspace: Mocks.MockOutdatedRunningWorkspaceRequireActiveVersion,
   },
 };
 
@@ -739,10 +747,3 @@ function makeFailedBuildLogs(): ProvisionerJobLog[] {
     },
   ];
 }
-
-export const UnsupportedWorkspace: Story = {
-  args: {
-    ...Running.args,
-    templateWarnings: ["UNSUPPORTED_WORKSPACES"],
-  },
-};

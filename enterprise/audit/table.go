@@ -71,6 +71,7 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"icon":                              ActionTrack,
 		"default_ttl":                       ActionTrack,
 		"max_ttl":                           ActionTrack,
+		"autostart_block_days_of_week":      ActionTrack,
 		"autostop_requirement_days_of_week": ActionTrack,
 		"autostop_requirement_weeks":        ActionTrack,
 		"created_by":                        ActionTrack,
@@ -84,6 +85,7 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"failure_ttl":                       ActionTrack,
 		"time_til_dormant":                  ActionTrack,
 		"time_til_dormant_autodelete":       ActionTrack,
+		"require_active_version":            ActionTrack,
 	},
 	&database.TemplateVersion{}: {
 		"id":                      ActionTrack,
@@ -99,6 +101,7 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"external_auth_providers": ActionIgnore, // Not helpful because this can only change when new versions are added.
 		"created_by_avatar_url":   ActionIgnore,
 		"created_by_username":     ActionIgnore,
+		"archived":                ActionTrack,
 	},
 	&database.User{}: {
 		"id":                   ActionTrack,
@@ -129,6 +132,7 @@ var auditableResourcesTypes = map[any]map[string]Action{
 		"last_used_at":       ActionIgnore,
 		"dormant_at":         ActionTrack,
 		"deleting_at":        ActionTrack,
+		"automatic_updates":  ActionTrack,
 	},
 	&database.WorkspaceBuild{}: {
 		"id":                      ActionIgnore,

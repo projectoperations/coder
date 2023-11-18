@@ -1,5 +1,13 @@
 import RefreshIcon from "@mui/icons-material/Refresh";
-import { FC } from "react";
+import InfoIcon from "@mui/icons-material/InfoOutlined";
+import Box from "@mui/material/Box";
+import Skeleton from "@mui/material/Skeleton";
+import Link from "@mui/material/Link";
+import { type FC } from "react";
+import { useQuery } from "react-query";
+import { css } from "@emotion/css";
+import { useTheme } from "@emotion/react";
+import { templateVersion } from "api/queries/templates";
 import {
   HelpTooltip,
   HelpTooltipAction,
@@ -7,20 +15,12 @@ import {
   HelpTooltipText,
   HelpTooltipTitle,
 } from "components/HelpTooltip/HelpTooltip";
-import InfoIcon from "@mui/icons-material/InfoOutlined";
-import { makeStyles } from "@mui/styles";
-import { colors } from "theme/colors";
-import { useQuery } from "@tanstack/react-query";
-import { templateVersion } from "api/queries/templates";
-import Box from "@mui/material/Box";
-import Skeleton from "@mui/material/Skeleton";
-import Link from "@mui/material/Link";
 
 export const Language = {
   outdatedLabel: "Outdated",
   versionTooltipText:
     "This workspace version is outdated and a newer version is available.",
-  updateVersionLabel: "Update version",
+  updateVersionLabel: "Update",
 };
 
 interface TooltipProps {
@@ -36,15 +36,23 @@ export const WorkspaceOutdatedTooltip: FC<TooltipProps> = ({
   latestVersionId,
   templateName,
 }) => {
-  const styles = useStyles();
   const { data: activeVersion } = useQuery(templateVersion(latestVersionId));
+  const theme = useTheme();
 
   return (
     <HelpTooltip
       size="small"
       icon={InfoIcon}
-      iconClassName={styles.icon}
-      buttonClassName={styles.button}
+      iconClassName={css`
+        color: ${theme.experimental.roles.notice.outline};
+      `}
+      buttonClassName={css`
+        opacity: 1;
+
+        &:hover {
+          opacity: 1;
+        }
+      `}
     >
       <HelpTooltipTitle>{Language.outdatedLabel}</HelpTooltipTitle>
       <HelpTooltipText>{Language.versionTooltipText}</HelpTooltipText>
@@ -117,17 +125,3 @@ export const WorkspaceOutdatedTooltip: FC<TooltipProps> = ({
     </HelpTooltip>
   );
 };
-
-const useStyles = makeStyles(() => ({
-  icon: {
-    color: colors.yellow[5],
-  },
-
-  button: {
-    opacity: 1,
-
-    "&:hover": {
-      opacity: 1,
-    },
-  },
-}));

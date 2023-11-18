@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "react-query";
 import { buildInfo } from "api/queries/buildInfo";
 import { experiments } from "api/queries/experiments";
 import { entitlements } from "api/queries/entitlements";
@@ -30,8 +30,8 @@ interface Appearance {
 interface DashboardProviderValue {
   buildInfo: BuildInfoResponse;
   entitlements: Entitlements;
-  appearance: Appearance;
   experiments: Experiments;
+  appearance: Appearance;
 }
 
 export const DashboardProviderContext = createContext<
@@ -43,6 +43,7 @@ export const DashboardProvider: FC<PropsWithChildren> = ({ children }) => {
   const entitlementsQuery = useQuery(entitlements());
   const experimentsQuery = useQuery(experiments());
   const appearanceQuery = useQuery(appearance());
+
   const isLoading =
     !buildInfoQuery.data ||
     !entitlementsQuery.data ||
@@ -119,4 +120,12 @@ export const useIsWorkspaceActionsEnabled = (): boolean => {
   // is merged up
   const allowWorkspaceActions = experiments.includes("workspace_actions");
   return allowWorkspaceActions && allowAdvancedScheduling;
+};
+
+export const useTemplatePoliciesEnabled = (): boolean => {
+  const { entitlements, experiments } = useDashboard();
+  return (
+    entitlements.features.access_control.enabled &&
+    experiments.includes("template_update_policies")
+  );
 };

@@ -350,13 +350,18 @@ func TestAgent_Session_TTY_MOTD(t *testing.T) {
 			unexpected: []string{},
 		},
 		{
-			name:     "Trim",
-			manifest: agentsdk.Manifest{},
+			name: "Trim",
+			// Enable motd since it will be printed after the banner,
+			// this ensures that we can test for an exact mount of
+			// newlines.
+			manifest: agentsdk.Manifest{
+				MOTDFile: name,
+			},
 			banner: codersdk.ServiceBannerConfig{
 				Enabled: true,
 				Message: "\n\n\n\n\n\nbanner\n\n\n\n\n\n",
 			},
-			expectedRe: regexp.MustCompile("([^\n\r]|^)banner\r\n\r\n[^\r\n]"),
+			expectedRe: regexp.MustCompile(`([^\n\r]|^)banner\r\n\r\n[^\r\n]`),
 		},
 	}
 
@@ -375,6 +380,7 @@ func TestAgent_Session_TTY_MOTD(t *testing.T) {
 	}
 }
 
+//nolint:tparallel // Sub tests need to run sequentially.
 func TestAgent_Session_TTY_MOTD_Update(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -434,33 +440,38 @@ func TestAgent_Session_TTY_MOTD_Update(t *testing.T) {
 	}
 	//nolint:dogsled // Allow the blank identifiers.
 	conn, client, _, _, _ := setupAgent(t, agentsdk.Manifest{}, 0, setSBInterval)
-	for _, test := range tests {
+
+	sshClient, err := conn.SSHClient(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = sshClient.Close()
+	})
+
+	//nolint:paralleltest // These tests need to swap the banner func.
+	for i, test := range tests {
 		test := test
-		// Set new banner func and wait for the agent to call it to update the
-		// banner.
-		ready := make(chan struct{}, 2)
-		client.SetServiceBannerFunc(func() (codersdk.ServiceBannerConfig, error) {
-			select {
-			case ready <- struct{}{}:
-			default:
-			}
-			return test.banner, nil
-		})
-		<-ready
-		<-ready // Wait for two updates to ensure the value has propagated.
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			// Set new banner func and wait for the agent to call it to update the
+			// banner.
+			ready := make(chan struct{}, 2)
+			client.SetServiceBannerFunc(func() (codersdk.ServiceBannerConfig, error) {
+				select {
+				case ready <- struct{}{}:
+				default:
+				}
+				return test.banner, nil
+			})
+			<-ready
+			<-ready // Wait for two updates to ensure the value has propagated.
 
-		sshClient, err := conn.SSHClient(ctx)
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			_ = sshClient.Close()
-		})
-		session, err := sshClient.NewSession()
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			_ = session.Close()
-		})
+			session, err := sshClient.NewSession()
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_ = session.Close()
+			})
 
-		testSessionOutput(t, session, test.expected, test.unexpected, nil)
+			testSessionOutput(t, session, test.expected, test.unexpected, nil)
+		})
 	}
 }
 
@@ -1066,34 +1077,43 @@ func TestAgent_Metadata(t *testing.T) {
 
 	t.Run("Once", func(t *testing.T) {
 		t.Parallel()
+
 		//nolint:dogsled
 		_, client, _, _, _ := setupAgent(t, agentsdk.Manifest{
 			Metadata: []codersdk.WorkspaceAgentMetadataDescription{
 				{
-					Key:      "greeting",
+					Key:      "greeting1",
 					Interval: 0,
+					Script:   echoHello,
+				},
+				{
+					Key:      "greeting2",
+					Interval: 1,
 					Script:   echoHello,
 				},
 			},
 		}, 0, func(_ *agenttest.Client, opts *agent.Options) {
-			opts.ReportMetadataInterval = 100 * time.Millisecond
+			opts.ReportMetadataInterval = testutil.IntervalFast
 		})
 
-		var gotMd map[string]agentsdk.PostMetadataRequest
+		var gotMd map[string]agentsdk.Metadata
 		require.Eventually(t, func() bool {
 			gotMd = client.GetMetadata()
-			return len(gotMd) == 1
-		}, testutil.WaitShort, testutil.IntervalMedium)
+			return len(gotMd) == 2
+		}, testutil.WaitShort, testutil.IntervalFast/2)
 
-		collectedAt := gotMd["greeting"].CollectedAt
+		collectedAt1 := gotMd["greeting1"].CollectedAt
+		collectedAt2 := gotMd["greeting2"].CollectedAt
 
-		require.Never(t, func() bool {
+		require.Eventually(t, func() bool {
 			gotMd = client.GetMetadata()
-			if len(gotMd) != 1 {
+			if len(gotMd) != 2 {
 				panic("unexpected number of metadata")
 			}
-			return !gotMd["greeting"].CollectedAt.Equal(collectedAt)
-		}, testutil.WaitShort, testutil.IntervalMedium)
+			return !gotMd["greeting2"].CollectedAt.Equal(collectedAt2)
+		}, testutil.WaitShort, testutil.IntervalFast/2)
+
+		require.Equal(t, gotMd["greeting1"].CollectedAt, collectedAt1, "metadata should not be collected again")
 	})
 
 	t.Run("Many", func(t *testing.T) {
@@ -1112,7 +1132,7 @@ func TestAgent_Metadata(t *testing.T) {
 			opts.ReportMetadataInterval = testutil.IntervalFast
 		})
 
-		var gotMd map[string]agentsdk.PostMetadataRequest
+		var gotMd map[string]agentsdk.Metadata
 		require.Eventually(t, func() bool {
 			gotMd = client.GetMetadata()
 			return len(gotMd) == 1
@@ -1544,11 +1564,13 @@ func TestAgent_ReconnectingPTY(t *testing.T) {
 	_, err := exec.LookPath("screen")
 	hasScreen := err == nil
 
+	// Make sure UTF-8 works even with LANG set to something like C.
+	t.Setenv("LANG", "C")
+
 	for _, backendType := range backends {
 		backendType := backendType
 		t.Run(backendType, func(t *testing.T) {
 			if backendType == "Screen" {
-				t.Parallel()
 				if runtime.GOOS != "linux" {
 					t.Skipf("`screen` is not supported on %s", runtime.GOOS)
 				} else if !hasScreen {
@@ -1563,8 +1585,6 @@ func TestAgent_ReconnectingPTY(t *testing.T) {
 				err = os.Symlink(bashPath, filepath.Join(dir, "bash"))
 				require.NoError(t, err, "symlink bash into reconnecting pty PATH")
 				t.Setenv("PATH", dir)
-			} else {
-				t.Parallel()
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
@@ -1656,6 +1676,17 @@ func TestAgent_ReconnectingPTY(t *testing.T) {
 			tr4 := testutil.NewTerminalReader(t, netConn4)
 			require.NoError(t, tr4.ReadUntil(ctx, matchEchoOutput), "find echo output")
 			require.ErrorIs(t, tr4.ReadUntil(ctx, nil), io.EOF)
+
+			// Ensure that UTF-8 is supported.  Avoid the terminal emulator because it
+			// does not appear to support UTF-8, just make sure the bytes that come
+			// back have the character in it.
+			netConn5, err := conn.ReconnectingPTY(ctx, uuid.New(), 80, 80, "echo ❯")
+			require.NoError(t, err)
+			defer netConn5.Close()
+
+			bytes, err := io.ReadAll(netConn5)
+			require.NoError(t, err)
+			require.Contains(t, string(bytes), "❯")
 		})
 	}
 }
@@ -1850,13 +1881,16 @@ func TestAgent_UpdatedDERP(t *testing.T) {
 func TestAgent_Speedtest(t *testing.T) {
 	t.Parallel()
 	t.Skip("This test is relatively flakey because of Tailscale's speedtest code...")
+	logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}).Leveled(slog.LevelDebug)
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 	defer cancel()
 	derpMap, _ := tailnettest.RunDERPAndSTUN(t)
 	//nolint:dogsled
 	conn, _, _, _, _ := setupAgent(t, agentsdk.Manifest{
 		DERPMap: derpMap,
-	}, 0)
+	}, 0, func(client *agenttest.Client, options *agent.Options) {
+		options.Logger = logger.Named("agent")
+	})
 	defer conn.Close()
 	res, err := conn.Speedtest(ctx, speedtest.Upload, 250*time.Millisecond)
 	require.NoError(t, err)

@@ -419,7 +419,6 @@ lint: lint/shellcheck lint/go lint/ts lint/helm lint/site-icons
 
 lint/site-icons:
 	./scripts/check_site_icons.sh
-
 .PHONY: lint/site-icons
 
 lint/ts:
@@ -449,13 +448,15 @@ lint/helm:
 DB_GEN_FILES := \
 	coderd/database/querier.go \
 	coderd/database/unique_constraint.go \
-	coderd/database/dbfake/dbfake.go \
+	coderd/database/dbmem/dbmem.go \
 	coderd/database/dbmetrics/dbmetrics.go \
 	coderd/database/dbauthz/dbauthz.go \
 	coderd/database/dbmock/dbmock.go
 
 # all gen targets should be added here and to gen/mark-fresh
 gen: \
+	tailnet/proto/tailnet.pb.go \
+	agent/proto/agent.pb.go \
 	provisionersdk/proto/provisioner.pb.go \
 	provisionerd/proto/provisionerd.pb.go \
 	coderd/database/dump.sql \
@@ -472,6 +473,7 @@ gen: \
 	site/.prettierignore \
 	site/.eslintignore \
 	site/e2e/provisionerGenerated.ts \
+	site/src/theme/icons.json \
 	examples/examples.gen.json
 .PHONY: gen
 
@@ -479,6 +481,8 @@ gen: \
 # used during releases so we don't run generation scripts.
 gen/mark-fresh:
 	files="\
+		tailnet/proto/tailnet.pb.go \
+		agent/proto/agent.pb.go \
 		provisionersdk/proto/provisioner.pb.go \
 		provisionerd/proto/provisionerd.pb.go \
 		coderd/database/dump.sql \
@@ -495,6 +499,7 @@ gen/mark-fresh:
 		site/.prettierignore \
 		site/.eslintignore \
 		site/e2e/provisionerGenerated.ts \
+		site/src/theme/icons.json \
 		examples/examples.gen.json \
 	"
 	for file in $$files; do
@@ -515,11 +520,29 @@ coderd/database/dump.sql: coderd/database/gen/dump/main.go $(wildcard coderd/dat
 	go run ./coderd/database/gen/dump/main.go
 
 # Generates Go code for querying the database.
+# coderd/database/queries.sql.go
+# coderd/database/models.go
 coderd/database/querier.go: coderd/database/sqlc.yaml coderd/database/dump.sql $(wildcard coderd/database/queries/*.sql)
 	./coderd/database/generate.sh
 
 coderd/database/dbmock/dbmock.go: coderd/database/db.go coderd/database/querier.go
 	go generate ./coderd/database/dbmock/
+
+tailnet/proto/tailnet.pb.go: tailnet/proto/tailnet.proto
+	protoc \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+		--go-drpc_out=. \
+		--go-drpc_opt=paths=source_relative \
+		./tailnet/proto/tailnet.proto
+
+agent/proto/agent.pb.go: agent/proto/agent.proto
+	protoc \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+		--go-drpc_out=. \
+		--go-drpc_opt=paths=source_relative \
+		./agent/proto/agent.proto
 
 provisionersdk/proto/provisioner.pb.go: provisionersdk/proto/provisioner.proto
 	protoc \
@@ -537,15 +560,18 @@ provisionerd/proto/provisionerd.pb.go: provisionerd/proto/provisionerd.proto
 		--go-drpc_opt=paths=source_relative \
 		./provisionerd/proto/provisionerd.proto
 
-site/src/api/typesGenerated.ts: scripts/apitypings/main.go $(shell find ./codersdk $(FIND_EXCLUSIONS) -type f -name '*.go')
-	go run scripts/apitypings/main.go > site/src/api/typesGenerated.ts
-	cd site
-	pnpm run format:types ./src/api/typesGenerated.ts
+site/src/api/typesGenerated.ts: $(wildcard scripts/apitypings/*) $(shell find ./codersdk $(FIND_EXCLUSIONS) -type f -name '*.go')
+	go run ./scripts/apitypings/ > $@
+	pnpm run format:write:only "$@"
 
 site/e2e/provisionerGenerated.ts: provisionerd/proto/provisionerd.pb.go provisionersdk/proto/provisioner.pb.go
 	cd site
 	../scripts/pnpm_install.sh
 	pnpm run gen:provisioner
+
+site/src/theme/icons.json: $(wildcard scripts/gensite/*) $(wildcard site/static/icon/*)
+	go run ./scripts/gensite/ -icons "$@"
+	pnpm run format:write:only "$@"
 
 examples/examples.gen.json: scripts/examplegen/main.go examples/examples.go $(shell find ./examples/templates)
 	go run ./scripts/examplegen/main.go > examples/examples.gen.json

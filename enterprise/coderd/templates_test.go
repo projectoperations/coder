@@ -18,6 +18,7 @@ import (
 	"github.com/coder/coder/v2/cryptorand"
 	"github.com/coder/coder/v2/enterprise/coderd/coderdenttest"
 	"github.com/coder/coder/v2/enterprise/coderd/license"
+	"github.com/coder/coder/v2/enterprise/coderd/schedule"
 	"github.com/coder/coder/v2/provisioner/echo"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -38,6 +39,7 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		exp := 24 * time.Hour.Milliseconds()
@@ -55,7 +57,7 @@ func TestTemplates(t *testing.T) {
 			TemplateID: template.ID,
 			Name:       "testing",
 		}
-		ws, err := client.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
+		ws, err := anotherClient.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
 		require.NoError(t, err)
 		require.NotNil(t, ws.TTLMillis)
 		require.EqualValues(t, exp, *ws.TTLMillis)
@@ -63,7 +65,7 @@ func TestTemplates(t *testing.T) {
 		// Editing a workspace to have a higher TTL than the template's max
 		// should error
 		exp = exp + time.Minute.Milliseconds()
-		err = client.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
+		err = anotherClient.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
 			TTLMillis: &exp,
 		})
 		require.Error(t, err)
@@ -77,7 +79,7 @@ func TestTemplates(t *testing.T) {
 		// Creating workspace with TTL higher than max should error
 		req.Name = "testing2"
 		req.TTLMillis = &exp
-		ws, err = client.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
+		ws, err = anotherClient.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
 		require.Error(t, err)
 		apiErr = nil
 		require.ErrorAs(t, err, &apiErr)
@@ -99,6 +101,7 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		exp := 24 * time.Hour.Milliseconds()
@@ -115,29 +118,114 @@ func TestTemplates(t *testing.T) {
 			TemplateID: template.ID,
 			Name:       "testing",
 		}
-		ws, err := client.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
+		ws, err := anotherClient.CreateWorkspace(ctx, template.OrganizationID, codersdk.Me, req)
 		require.NoError(t, err)
 		require.NotNil(t, ws.TTLMillis)
 		require.EqualValues(t, exp, *ws.TTLMillis)
 
 		// Editing a workspace to disable the TTL should do nothing
-		err = client.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
+		err = anotherClient.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
 			TTLMillis: nil,
 		})
 		require.NoError(t, err)
-		ws, err = client.Workspace(ctx, ws.ID)
+		ws, err = anotherClient.Workspace(ctx, ws.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, exp, *ws.TTLMillis)
 
 		// Editing a workspace to have a TTL of 0 should do nothing
 		zero := int64(0)
-		err = client.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
+		err = anotherClient.UpdateWorkspaceTTL(ctx, ws.ID, codersdk.UpdateWorkspaceTTLRequest{
 			TTLMillis: &zero,
 		})
 		require.NoError(t, err)
-		ws, err = client.Workspace(ctx, ws.ID)
+		ws, err = anotherClient.Workspace(ctx, ws.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, exp, *ws.TTLMillis)
+	})
+
+	t.Run("SetAutostartRequirement", func(t *testing.T) {
+		t.Parallel()
+
+		client, user := coderdenttest.New(t, &coderdenttest.Options{
+			Options: &coderdtest.Options{
+				IncludeProvisionerDaemon: true,
+			},
+			LicenseOptions: &coderdenttest.LicenseOptions{
+				Features: license.Features{
+					codersdk.FeatureAdvancedTemplateScheduling: 1,
+				},
+			},
+		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
+
+		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+		require.Equal(t, []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}, template.AutostartRequirement.DaysOfWeek)
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		updated, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+			Name:        template.Name,
+			DisplayName: template.DisplayName,
+			Description: template.Description,
+			Icon:        template.Icon,
+			AutostartRequirement: &codersdk.TemplateAutostartRequirement{
+				DaysOfWeek: []string{"monday", "saturday"},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"monday", "saturday"}, updated.AutostartRequirement.DaysOfWeek)
+
+		template, err = anotherClient.Template(ctx, template.ID)
+		require.NoError(t, err)
+		require.Equal(t, []string{"monday", "saturday"}, template.AutostartRequirement.DaysOfWeek)
+
+		// Ensure a missing field is a noop
+		updated, err = anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+			Name:        template.Name,
+			DisplayName: template.DisplayName,
+			Description: template.Description,
+			Icon:        template.Icon + "something",
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"monday", "saturday"}, updated.AutostartRequirement.DaysOfWeek)
+
+		template, err = anotherClient.Template(ctx, template.ID)
+		require.NoError(t, err)
+		require.Equal(t, []string{"monday", "saturday"}, template.AutostartRequirement.DaysOfWeek)
+	})
+
+	t.Run("SetInvalidAutostartRequirement", func(t *testing.T) {
+		t.Parallel()
+
+		client, user := coderdenttest.New(t, &coderdenttest.Options{
+			Options: &coderdtest.Options{
+				IncludeProvisionerDaemon: true,
+			},
+			LicenseOptions: &coderdenttest.LicenseOptions{
+				Features: license.Features{
+					codersdk.FeatureAdvancedTemplateScheduling: 1,
+				},
+			},
+		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
+
+		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+		require.Equal(t, []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}, template.AutostartRequirement.DaysOfWeek)
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		_, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+			Name:        template.Name,
+			DisplayName: template.DisplayName,
+			Description: template.Description,
+			Icon:        template.Icon,
+			AutostartRequirement: &codersdk.TemplateAutostartRequirement{
+				DaysOfWeek: []string{"foobar", "saturday"},
+			},
+		})
+		require.Error(t, err)
 	})
 
 	t.Run("SetAutostopRequirement", func(t *testing.T) {
@@ -153,6 +241,7 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
@@ -160,9 +249,8 @@ func TestTemplates(t *testing.T) {
 		require.Empty(t, 0, template.AutostopRequirement.DaysOfWeek)
 		require.EqualValues(t, 1, template.AutostopRequirement.Weeks)
 
-		// ctx := testutil.Context(t, testutil.WaitLong)
 		ctx := context.Background()
-		updated, err := client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+		updated, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
 			Name:                         template.Name,
 			DisplayName:                  template.DisplayName,
 			Description:                  template.Description,
@@ -178,62 +266,131 @@ func TestTemplates(t *testing.T) {
 		require.Equal(t, []string{"monday", "saturday"}, updated.AutostopRequirement.DaysOfWeek)
 		require.EqualValues(t, 3, updated.AutostopRequirement.Weeks)
 
-		template, err = client.Template(ctx, template.ID)
+		template, err = anotherClient.Template(ctx, template.ID)
 		require.NoError(t, err)
 		require.Equal(t, []string{"monday", "saturday"}, template.AutostopRequirement.DaysOfWeek)
 		require.EqualValues(t, 3, template.AutostopRequirement.Weeks)
 	})
 
 	t.Run("CleanupTTLs", func(t *testing.T) {
-		t.Parallel()
+		t.Run("OK", func(t *testing.T) {
+			t.Parallel()
 
-		ctx := testutil.Context(t, testutil.WaitMedium)
-		client, user := coderdenttest.New(t, &coderdenttest.Options{
-			Options: &coderdtest.Options{
-				IncludeProvisionerDaemon: true,
-			},
-			LicenseOptions: &coderdenttest.LicenseOptions{
-				Features: license.Features{
-					codersdk.FeatureAdvancedTemplateScheduling: 1,
+			ctx := testutil.Context(t, testutil.WaitMedium)
+			client, user := coderdenttest.New(t, &coderdenttest.Options{
+				Options: &coderdtest.Options{
+					IncludeProvisionerDaemon: true,
 				},
-			},
+				LicenseOptions: &coderdenttest.LicenseOptions{
+					Features: license.Features{
+						codersdk.FeatureAdvancedTemplateScheduling: 1,
+					},
+				},
+			})
+			anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
+
+			version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+			coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+			template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+			require.EqualValues(t, 0, template.TimeTilDormantMillis)
+			require.EqualValues(t, 0, template.FailureTTLMillis)
+			require.EqualValues(t, 0, template.TimeTilDormantAutoDeleteMillis)
+
+			var (
+				failureTTL    = 1 * time.Minute
+				inactivityTTL = 2 * time.Minute
+				dormantTTL    = 3 * time.Minute
+			)
+
+			updated, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+				Name:                           template.Name,
+				DisplayName:                    template.DisplayName,
+				Description:                    template.Description,
+				Icon:                           template.Icon,
+				AllowUserCancelWorkspaceJobs:   template.AllowUserCancelWorkspaceJobs,
+				TimeTilDormantMillis:           inactivityTTL.Milliseconds(),
+				FailureTTLMillis:               failureTTL.Milliseconds(),
+				TimeTilDormantAutoDeleteMillis: dormantTTL.Milliseconds(),
+			})
+			require.NoError(t, err)
+			require.Equal(t, failureTTL.Milliseconds(), updated.FailureTTLMillis)
+			require.Equal(t, inactivityTTL.Milliseconds(), updated.TimeTilDormantMillis)
+			require.Equal(t, dormantTTL.Milliseconds(), updated.TimeTilDormantAutoDeleteMillis)
+
+			// Validate fetching the template returns the same values as updating
+			// the template.
+			template, err = anotherClient.Template(ctx, template.ID)
+			require.NoError(t, err)
+			require.Equal(t, failureTTL.Milliseconds(), updated.FailureTTLMillis)
+			require.Equal(t, inactivityTTL.Milliseconds(), updated.TimeTilDormantMillis)
+			require.Equal(t, dormantTTL.Milliseconds(), updated.TimeTilDormantAutoDeleteMillis)
 		})
 
-		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
-		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
-		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
-		require.EqualValues(t, 0, template.TimeTilDormantMillis)
-		require.EqualValues(t, 0, template.FailureTTLMillis)
-		require.EqualValues(t, 0, template.TimeTilDormantAutoDeleteMillis)
+		t.Run("BadRequest", func(t *testing.T) {
+			t.Parallel()
 
-		var (
-			failureTTL    int64 = 1
-			inactivityTTL int64 = 2
-			dormantTTL    int64 = 3
-		)
+			ctx := testutil.Context(t, testutil.WaitMedium)
+			client, user := coderdenttest.New(t, &coderdenttest.Options{
+				Options: &coderdtest.Options{
+					IncludeProvisionerDaemon: true,
+				},
+				LicenseOptions: &coderdenttest.LicenseOptions{
+					Features: license.Features{
+						codersdk.FeatureAdvancedTemplateScheduling: 1,
+					},
+				},
+			})
+			anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
-		updated, err := client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
-			Name:                           template.Name,
-			DisplayName:                    template.DisplayName,
-			Description:                    template.Description,
-			Icon:                           template.Icon,
-			AllowUserCancelWorkspaceJobs:   template.AllowUserCancelWorkspaceJobs,
-			TimeTilDormantMillis:           inactivityTTL,
-			FailureTTLMillis:               failureTTL,
-			TimeTilDormantAutoDeleteMillis: dormantTTL,
+			version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+			coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+			template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+
+			type testcase struct {
+				Name                string
+				TimeTilDormantMS    int64
+				FailureTTLMS        int64
+				DormantAutoDeleteMS int64
+			}
+
+			cases := []testcase{
+				{
+					Name:                "NegativeValue",
+					TimeTilDormantMS:    -1,
+					FailureTTLMS:        -2,
+					DormantAutoDeleteMS: -3,
+				},
+				{
+					Name:                "ValueTooSmall",
+					TimeTilDormantMS:    1,
+					FailureTTLMS:        999,
+					DormantAutoDeleteMS: 500,
+				},
+			}
+
+			for _, c := range cases {
+				c := c
+
+				// nolint: paralleltest // context is from parent t.Run
+				t.Run(c.Name, func(t *testing.T) {
+					_, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+						Name:                           template.Name,
+						DisplayName:                    template.DisplayName,
+						Description:                    template.Description,
+						Icon:                           template.Icon,
+						AllowUserCancelWorkspaceJobs:   template.AllowUserCancelWorkspaceJobs,
+						TimeTilDormantMillis:           c.TimeTilDormantMS,
+						FailureTTLMillis:               c.FailureTTLMS,
+						TimeTilDormantAutoDeleteMillis: c.DormantAutoDeleteMS,
+					})
+					require.Error(t, err)
+					cerr, ok := codersdk.AsError(err)
+					require.True(t, ok)
+					require.Len(t, cerr.Validations, 3)
+					require.Equal(t, "Value must be at least one minute.", cerr.Validations[0].Detail)
+				})
+			}
 		})
-		require.NoError(t, err)
-		require.Equal(t, failureTTL, updated.FailureTTLMillis)
-		require.Equal(t, inactivityTTL, updated.TimeTilDormantMillis)
-		require.Equal(t, dormantTTL, updated.TimeTilDormantAutoDeleteMillis)
-
-		// Validate fetching the template returns the same values as updating
-		// the template.
-		template, err = client.Template(ctx, template.ID)
-		require.NoError(t, err)
-		require.Equal(t, failureTTL, updated.FailureTTLMillis)
-		require.Equal(t, inactivityTTL, updated.TimeTilDormantMillis)
-		require.Equal(t, dormantTTL, updated.TimeTilDormantAutoDeleteMillis)
 	})
 
 	t.Run("UpdateTimeTilDormantAutoDelete", func(t *testing.T) {
@@ -250,19 +407,20 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
-		activeWS := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-		dormantWS := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
+		activeWS := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
+		dormantWS := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
 		require.Nil(t, activeWS.DeletingAt)
 		require.Nil(t, dormantWS.DeletingAt)
 
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, activeWS.LatestBuild.ID)
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, dormantWS.LatestBuild.ID)
 
-		err := client.UpdateWorkspaceDormancy(ctx, dormantWS.ID, codersdk.UpdateWorkspaceDormancy{
+		err := anotherClient.UpdateWorkspaceDormancy(ctx, dormantWS.ID, codersdk.UpdateWorkspaceDormancy{
 			Dormant: true,
 		})
 		require.NoError(t, err)
@@ -273,7 +431,7 @@ func TestTemplates(t *testing.T) {
 		require.Nil(t, dormantWS.DeletingAt)
 
 		dormantTTL := time.Minute
-		updated, err := client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+		updated, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
 			TimeTilDormantAutoDeleteMillis: dormantTTL.Milliseconds(),
 		})
 		require.NoError(t, err)
@@ -291,7 +449,7 @@ func TestTemplates(t *testing.T) {
 
 		// Disable the time_til_dormant_auto_delete on the template, then we can assert that the workspaces
 		// no longer have a deleting_at field.
-		updated, err = client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+		updated, err = anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
 			TimeTilDormantAutoDeleteMillis: 0,
 		})
 		require.NoError(t, err)
@@ -323,19 +481,20 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
-		activeWS := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-		dormantWS := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
+		activeWS := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
+		dormantWS := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
 		require.Nil(t, activeWS.DeletingAt)
 		require.Nil(t, dormantWS.DeletingAt)
 
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, activeWS.LatestBuild.ID)
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, dormantWS.LatestBuild.ID)
 
-		err := client.UpdateWorkspaceDormancy(ctx, dormantWS.ID, codersdk.UpdateWorkspaceDormancy{
+		err := anotherClient.UpdateWorkspaceDormancy(ctx, dormantWS.ID, codersdk.UpdateWorkspaceDormancy{
 			Dormant: true,
 		})
 		require.NoError(t, err)
@@ -346,6 +505,7 @@ func TestTemplates(t *testing.T) {
 		require.Nil(t, dormantWS.DeletingAt)
 
 		dormantTTL := time.Minute
+		//nolint:gocritic // non-template-admin cannot update template meta
 		updated, err := client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
 			TimeTilDormantAutoDeleteMillis: dormantTTL.Milliseconds(),
 			UpdateWorkspaceDormantAt:       true,
@@ -379,19 +539,20 @@ func TestTemplates(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
-		activeWorkspace := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
-		dormantWorkspace := coderdtest.CreateWorkspace(t, client, user.OrganizationID, template.ID)
+		activeWorkspace := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
+		dormantWorkspace := coderdtest.CreateWorkspace(t, anotherClient, user.OrganizationID, template.ID)
 		require.Nil(t, activeWorkspace.DeletingAt)
 		require.Nil(t, dormantWorkspace.DeletingAt)
 
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, activeWorkspace.LatestBuild.ID)
 		_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, dormantWorkspace.LatestBuild.ID)
 
-		err := client.UpdateWorkspaceDormancy(ctx, dormantWorkspace.ID, codersdk.UpdateWorkspaceDormancy{
+		err := anotherClient.UpdateWorkspaceDormancy(ctx, dormantWorkspace.ID, codersdk.UpdateWorkspaceDormancy{
 			Dormant: true,
 		})
 		require.NoError(t, err)
@@ -402,7 +563,7 @@ func TestTemplates(t *testing.T) {
 		require.Nil(t, dormantWorkspace.DeletingAt)
 
 		inactivityTTL := time.Minute
-		updated, err := client.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+		updated, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
 			TimeTilDormantMillis:      inactivityTTL.Milliseconds(),
 			UpdateWorkspaceLastUsedAt: true,
 		})
@@ -421,6 +582,52 @@ func TestTemplates(t *testing.T) {
 		require.Equal(t, updatedDormantWS.DormantAt, dormantWorkspace.DormantAt)
 		require.True(t, updatedDormantWS.LastUsedAt.After(dormantWorkspace.LastUsedAt))
 	})
+
+	t.Run("RequireActiveVersion", func(t *testing.T) {
+		t.Parallel()
+		client, user := coderdenttest.New(t, &coderdenttest.Options{
+			Options: &coderdtest.Options{
+				IncludeProvisionerDaemon: true,
+				TemplateScheduleStore:    schedule.NewEnterpriseTemplateScheduleStore(agplUserQuietHoursScheduleStore()),
+			},
+			LicenseOptions: &coderdenttest.LicenseOptions{
+				Features: license.Features{
+					codersdk.FeatureAccessControl: 1,
+				},
+			},
+		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
+
+		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID, func(ctr *codersdk.CreateTemplateRequest) {
+			ctr.RequireActiveVersion = true
+		})
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+		require.True(t, template.RequireActiveVersion)
+
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+		defer cancel()
+
+		// Update the field and assert it persists.
+		updatedTemplate, err := anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+			RequireActiveVersion: false,
+		})
+		require.NoError(t, err)
+		require.False(t, updatedTemplate.RequireActiveVersion)
+
+		// Flip it back to ensure we aren't hardcoding to a default value.
+		updatedTemplate, err = anotherClient.UpdateTemplateMeta(ctx, template.ID, codersdk.UpdateTemplateMeta{
+			RequireActiveVersion: true,
+		})
+		require.NoError(t, err)
+		require.True(t, updatedTemplate.RequireActiveVersion)
+
+		// Assert that fetching a template is no different from the response
+		// when updating.
+		template, err = anotherClient.Template(ctx, template.ID)
+		require.NoError(t, err)
+		require.Equal(t, updatedTemplate, template)
+	})
 }
 
 func TestTemplateACL(t *testing.T) {
@@ -433,6 +640,7 @@ func TestTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		_, user2 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		_, user3 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
@@ -441,7 +649,7 @@ func TestTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		err := client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user2.ID.String(): codersdk.TemplateRoleUse,
 				user3.ID.String(): codersdk.TemplateRoleAdmin,
@@ -449,7 +657,7 @@ func TestTemplateACL(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		templateUser2 := codersdk.TemplateUser{
@@ -476,14 +684,14 @@ func TestTemplateACL(t *testing.T) {
 		}})
 
 		// Create a user to assert they aren't returned in the response.
-		_, _ = coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Len(t, acl.Groups, 1)
@@ -506,6 +714,7 @@ func TestTemplateACL(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
+		//nolint:gocritic // non-template-admin cannot update template acl
 		acl, err := client.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
@@ -525,6 +734,7 @@ func TestTemplateACL(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		//nolint:gocritic // non-template-admin cannot update template acl
 		acl, err = client.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
@@ -548,6 +758,7 @@ func TestTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin(), rbac.RoleUserAdmin())
 
 		_, user1 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
@@ -555,24 +766,24 @@ func TestTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		err := client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user1.ID.String(): codersdk.TemplateRoleUse,
 			},
 		})
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Contains(t, acl.Users, codersdk.TemplateUser{
 			User: user1,
 			Role: codersdk.TemplateRoleUse,
 		})
 
-		err = client.DeleteUser(ctx, user1.ID)
+		err = anotherClient.DeleteUser(ctx, user1.ID)
 		require.NoError(t, err)
 
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Len(t, acl.Users, 0, "deleted users should be filtered")
 	})
@@ -586,6 +797,7 @@ func TestTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin(), rbac.RoleUserAdmin())
 
 		_, user1 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
@@ -593,24 +805,24 @@ func TestTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		err := client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user1.ID.String(): codersdk.TemplateRoleUse,
 			},
 		})
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Contains(t, acl.Users, codersdk.TemplateUser{
 			User: user1,
 			Role: codersdk.TemplateRoleUse,
 		})
 
-		_, err = client.UpdateUserStatus(ctx, user1.ID.String(), codersdk.UserStatusSuspended)
+		_, err = anotherClient.UpdateUserStatus(ctx, user1.ID.String(), codersdk.UserStatusSuspended)
 		require.NoError(t, err)
 
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Len(t, acl.Users, 0, "suspended users should be filtered")
 	})
@@ -624,25 +836,26 @@ func TestTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin(), rbac.RoleUserAdmin())
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		group, err := client.CreateGroup(ctx, user.OrganizationID, codersdk.CreateGroupRequest{
+		group, err := anotherClient.CreateGroup(ctx, user.OrganizationID, codersdk.CreateGroupRequest{
 			Name: "test",
 		})
 		require.NoError(t, err)
 
-		err = client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err = anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			GroupPerms: map[string]codersdk.TemplateRole{
 				group.ID.String(): codersdk.TemplateRoleUse,
 			},
 		})
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		// Length should be 2 for test group and the implicit allUsers group.
 		require.Len(t, acl.Groups, 2)
@@ -652,10 +865,10 @@ func TestTemplateACL(t *testing.T) {
 			Role:  codersdk.TemplateRoleUse,
 		})
 
-		err = client.DeleteGroup(ctx, group.ID)
+		err = anotherClient.DeleteGroup(ctx, group.ID)
 		require.NoError(t, err)
 
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		// Length should be 1 for the allUsers group.
 		require.Len(t, acl.Groups, 1)
@@ -679,6 +892,7 @@ func TestTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
+		//nolint:gocritic // test setup
 		err := client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user1.ID.String(): codersdk.TemplateRoleUse,
@@ -700,6 +914,7 @@ func TestTemplateACL(t *testing.T) {
 		})
 		require.Error(t, err)
 
+		//nolint:gocritic // test setup
 		err = client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user1.ID.String(): codersdk.TemplateRoleAdmin,
@@ -728,6 +943,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		_, user2 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		_, user3 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
@@ -737,7 +953,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
-		err := client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				user2.ID.String(): codersdk.TemplateRoleUse,
 				user3.ID.String(): codersdk.TemplateRoleAdmin,
@@ -745,7 +961,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		templateUser2 := codersdk.TemplateUser{
@@ -780,6 +996,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				},
 			},
 		})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
@@ -793,13 +1010,15 @@ func TestUpdateTemplateACL(t *testing.T) {
 				user.OrganizationID.String(): codersdk.TemplateRoleDeleted,
 			},
 		}
-		err := client.UpdateTemplateACL(ctx, template.ID, req)
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, req)
 		require.NoError(t, err)
 		numLogs++
 
 		require.Len(t, auditor.AuditLogs(), numLogs)
-		require.Equal(t, database.AuditActionWrite, auditor.AuditLogs()[numLogs-1].Action)
-		require.Equal(t, template.ID, auditor.AuditLogs()[numLogs-1].ResourceID)
+		require.True(t, auditor.Contains(t, database.AuditLog{
+			Action:     database.AuditActionWrite,
+			ResourceID: template.ID,
+		}))
 	})
 
 	t.Run("DeleteUser", func(t *testing.T) {
@@ -810,6 +1029,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		_, user2 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		_, user3 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
@@ -825,10 +1045,10 @@ func TestUpdateTemplateACL(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
-		err := client.UpdateTemplateACL(ctx, template.ID, req)
+		err := anotherClient.UpdateTemplateACL(ctx, template.ID, req)
 		require.NoError(t, err)
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Contains(t, acl.Users, codersdk.TemplateUser{
 			User: user2,
@@ -846,10 +1066,10 @@ func TestUpdateTemplateACL(t *testing.T) {
 			},
 		}
 
-		err = client.UpdateTemplateACL(ctx, template.ID, req)
+		err = anotherClient.UpdateTemplateACL(ctx, template.ID, req)
 		require.NoError(t, err)
 
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Contains(t, acl.Users, codersdk.TemplateUser{
@@ -882,6 +1102,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
+		//nolint:gocritic // we're testing invalid UUID so testing RBAC is not relevant here.
 		err := client.UpdateTemplateACL(ctx, template.ID, req)
 		require.Error(t, err)
 		cerr, _ := codersdk.AsError(err)
@@ -907,6 +1128,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
+		//nolint:gocritic // we're testing invalid user so testing RBAC is not relevant here.
 		err := client.UpdateTemplateACL(ctx, template.ID, req)
 		require.Error(t, err)
 		cerr, _ := codersdk.AsError(err)
@@ -933,6 +1155,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
+		//nolint:gocritic // we're testing invalid role so testing RBAC is not relevant here.
 		err := client.UpdateTemplateACL(ctx, template.ID, req)
 		require.Error(t, err)
 		cerr, _ := codersdk.AsError(err)
@@ -948,6 +1171,8 @@ func TestUpdateTemplateACL(t *testing.T) {
 			},
 		}})
 
+		client1, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
+
 		client2, user2 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
@@ -959,7 +1184,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		err := client.UpdateTemplateACL(ctx, template.ID, req)
+		err := client1.UpdateTemplateACL(ctx, template.ID, req)
 		require.NoError(t, err)
 
 		req = codersdk.UpdateTemplateACL{
@@ -982,6 +1207,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		client1, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		client2, user2 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		_, user3 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
@@ -995,7 +1221,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
-		err := client.UpdateTemplateACL(ctx, template.ID, req)
+		err := client1.UpdateTemplateACL(ctx, template.ID, req)
 		require.NoError(t, err)
 
 		// Should be able to see user 3
@@ -1038,6 +1264,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
 		template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
@@ -1045,7 +1272,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Len(t, acl.Groups, 1)
@@ -1060,6 +1287,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin(), rbac.RoleUserAdmin())
 
 		client1, user1 := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
@@ -1068,18 +1296,18 @@ func TestUpdateTemplateACL(t *testing.T) {
 		ctx := testutil.Context(t, testutil.WaitLong)
 
 		// Create a group to add to the template.
-		group, err := client.CreateGroup(ctx, user.OrganizationID, codersdk.CreateGroupRequest{
+		group, err := anotherClient.CreateGroup(ctx, user.OrganizationID, codersdk.CreateGroupRequest{
 			Name: "test",
 		})
 		require.NoError(t, err)
 
 		// Check that the only current group is the allUsers group.
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 		require.Len(t, acl.Groups, 1)
 
 		// Update the template to only allow access to the 'test' group.
-		err = client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err = anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			GroupPerms: map[string]codersdk.TemplateRole{
 				// The allUsers group shares the same ID as the organization.
 				user.OrganizationID.String(): codersdk.TemplateRoleDeleted,
@@ -1090,7 +1318,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		// Get the ACL list for the template and assert the test group is
 		// present.
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Len(t, acl.Groups, 1)
@@ -1106,7 +1334,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, cerr.StatusCode())
 
 		// Patch the group to add the regular user.
-		group, err = client.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
+		group, err = anotherClient.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
 			AddUsers: []string{user1.ID.String()},
 		})
 		require.NoError(t, err)
@@ -1125,6 +1353,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 				codersdk.FeatureTemplateRBAC: 1,
 			},
 		}})
+		anotherClient, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID, rbac.RoleTemplateAdmin())
 
 		client1, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 		version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
@@ -1133,7 +1362,7 @@ func TestUpdateTemplateACL(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 		defer cancel()
 
-		acl, err := client.TemplateACL(ctx, template.ID)
+		acl, err := anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Len(t, acl.Groups, 1)
@@ -1145,14 +1374,14 @@ func TestUpdateTemplateACL(t *testing.T) {
 
 		allUsers := acl.Groups[0]
 
-		err = client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
+		err = anotherClient.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			GroupPerms: map[string]codersdk.TemplateRole{
 				allUsers.ID.String(): codersdk.TemplateRoleDeleted,
 			},
 		})
 		require.NoError(t, err)
 
-		acl, err = client.TemplateACL(ctx, template.ID)
+		acl, err = anotherClient.TemplateACL(ctx, template.ID)
 		require.NoError(t, err)
 
 		require.Len(t, acl.Groups, 0)
@@ -1181,6 +1410,7 @@ func TestReadFileWithTemplateUpdate(t *testing.T) {
 
 		ctx := testutil.Context(t, testutil.WaitLong)
 
+		//nolint:gocritic // regular user cannot create file
 		resp, err := client.Upload(ctx, codersdk.ContentTypeTar, bytes.NewReader(make([]byte, 1024)))
 		require.NoError(t, err)
 
@@ -1201,6 +1431,7 @@ func TestReadFileWithTemplateUpdate(t *testing.T) {
 		_, _, err = member.Download(ctx, resp.ID)
 		require.Error(t, err, "not in acl yet")
 
+		//nolint:gocritic // regular user cannot update template acl
 		err = client.UpdateTemplateACL(ctx, template.ID, codersdk.UpdateTemplateACL{
 			UserPerms: map[string]codersdk.TemplateRole{
 				memberData.ID.String(): codersdk.TemplateRoleAdmin,

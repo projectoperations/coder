@@ -4,7 +4,7 @@ import {
   MockUser2,
   MockAssignableSiteRoles,
   mockApiError,
-  MockAuthMethods,
+  MockAuthMethodsPasswordOnly,
 } from "testHelpers/entities";
 import { UsersPageView } from "./UsersPageView";
 import { ComponentProps } from "react";
@@ -26,7 +26,7 @@ const defaultFilterProps = getDefaultFilterProps<FilterProps>({
 });
 
 const meta: Meta<typeof UsersPageView> = {
-  title: "pages/UsersPageView",
+  title: "pages/UsersPage",
   component: UsersPageView,
   args: {
     page: 1,
@@ -37,7 +37,7 @@ const meta: Meta<typeof UsersPageView> = {
     count: 2,
     canEditUsers: true,
     filterProps: defaultFilterProps,
-    authMethods: MockAuthMethods,
+    authMethods: MockAuthMethodsPasswordOnly,
   },
 };
 

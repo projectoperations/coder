@@ -1,12 +1,13 @@
 import CssBaseline from "@mui/material/CssBaseline";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "react-query";
 import { AuthProvider } from "components/AuthProvider/AuthProvider";
-import { FC, PropsWithChildren } from "react";
+import type { FC, PropsWithChildren, ReactNode } from "react";
 import { HelmetProvider } from "react-helmet-async";
 import { AppRouter } from "./AppRouter";
 import { ErrorBoundary } from "./components/ErrorBoundary/ErrorBoundary";
 import { GlobalSnackbar } from "./components/GlobalSnackbar/GlobalSnackbar";
-import { dark } from "./theme";
+import { dark } from "./theme/mui";
+import { dark as experimental } from "./theme/experimental";
 import "./theme/globalFonts";
 import {
   StyledEngineProvider,
@@ -14,7 +15,7 @@ import {
 } from "@mui/material/styles";
 import { ThemeProvider as EmotionThemeProvider } from "@emotion/react";
 
-const queryClient = new QueryClient({
+const defaultQueryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
@@ -25,24 +26,43 @@ const queryClient = new QueryClient({
   },
 });
 
-export const AppProviders: FC<PropsWithChildren> = ({ children }) => {
+const theme = {
+  ...dark,
+  experimental,
+};
+
+export const ThemeProviders: FC<PropsWithChildren> = ({ children }) => {
+  return (
+    <StyledEngineProvider injectFirst>
+      <MuiThemeProvider theme={theme}>
+        <EmotionThemeProvider theme={theme}>
+          <CssBaseline enableColorScheme />
+          {children}
+        </EmotionThemeProvider>
+      </MuiThemeProvider>
+    </StyledEngineProvider>
+  );
+};
+
+export const AppProviders = ({
+  children,
+  queryClient = defaultQueryClient,
+}: {
+  children: ReactNode;
+  queryClient?: QueryClient;
+}) => {
   return (
     <HelmetProvider>
-      <StyledEngineProvider injectFirst>
-        <MuiThemeProvider theme={dark}>
-          <EmotionThemeProvider theme={dark}>
-            <CssBaseline enableColorScheme />
-            <ErrorBoundary>
-              <QueryClientProvider client={queryClient}>
-                <AuthProvider>
-                  {children}
-                  <GlobalSnackbar />
-                </AuthProvider>
-              </QueryClientProvider>
-            </ErrorBoundary>
-          </EmotionThemeProvider>
-        </MuiThemeProvider>
-      </StyledEngineProvider>
+      <ThemeProviders>
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              {children}
+              <GlobalSnackbar />
+            </AuthProvider>
+          </QueryClientProvider>
+        </ErrorBoundary>
+      </ThemeProviders>
     </HelmetProvider>
   );
 };

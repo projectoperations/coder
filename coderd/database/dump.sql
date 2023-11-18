@@ -22,6 +22,11 @@ CREATE TYPE audit_action AS ENUM (
     'register'
 );
 
+CREATE TYPE automatic_updates AS ENUM (
+    'always',
+    'never'
+);
+
 CREATE TYPE build_reason AS ENUM (
     'initiator',
     'autostart',
@@ -89,6 +94,18 @@ CREATE TYPE parameter_type_system AS ENUM (
     'hcl'
 );
 
+CREATE TYPE provisioner_job_status AS ENUM (
+    'pending',
+    'running',
+    'succeeded',
+    'canceling',
+    'canceled',
+    'failed',
+    'unknown'
+);
+
+COMMENT ON TYPE provisioner_job_status IS 'Computed status of a provisioner job. Jobs could be stuck in a hung state, these states do not guarantee any transition to another state.';
+
 CREATE TYPE provisioner_job_type AS ENUM (
     'template_version_import',
     'workspace_build',
@@ -122,6 +139,11 @@ CREATE TYPE resource_type AS ENUM (
 CREATE TYPE startup_script_behavior AS ENUM (
     'blocking',
     'non-blocking'
+);
+
+CREATE TYPE tailnet_status AS ENUM (
+    'ok',
+    'lost'
 );
 
 CREATE TYPE user_status AS ENUM (
@@ -275,6 +297,35 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION tailnet_notify_peer_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	IF (OLD IS NOT NULL) THEN
+		PERFORM pg_notify('tailnet_peer_update', OLD.id::text);
+		RETURN NULL;
+	END IF;
+	IF (NEW IS NOT NULL) THEN
+		PERFORM pg_notify('tailnet_peer_update', NEW.id::text);
+		RETURN NULL;
+	END IF;
+END;
+$$;
+
+CREATE FUNCTION tailnet_notify_tunnel_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	IF (NEW IS NOT NULL) THEN
+		PERFORM pg_notify('tailnet_tunnel_update', NEW.src_id || ',' || NEW.dst_id);
+		RETURN NULL;
+	ELSIF (OLD IS NOT NULL) THEN
+		PERFORM pg_notify('tailnet_tunnel_update', OLD.src_id || ',' || OLD.dst_id);
+		RETURN NULL;
+	END IF;
+END;
+$$;
+
 CREATE TABLE api_keys (
     id text NOT NULL,
     hashed_secret bytea NOT NULL,
@@ -342,7 +393,8 @@ CREATE TABLE external_auth_links (
     oauth_refresh_token text NOT NULL,
     oauth_expiry timestamp with time zone NOT NULL,
     oauth_access_token_key_id text,
-    oauth_refresh_token_key_id text
+    oauth_refresh_token_key_id text,
+    oauth_extra jsonb
 );
 
 COMMENT ON COLUMN external_auth_links.oauth_access_token_key_id IS 'The ID of the key used to encrypt the OAuth access token. If this is NULL, the access token is not encrypted';
@@ -500,8 +552,26 @@ CREATE TABLE provisioner_jobs (
     file_id uuid NOT NULL,
     tags jsonb DEFAULT '{"scope": "organization"}'::jsonb NOT NULL,
     error_code text,
-    trace_metadata jsonb
+    trace_metadata jsonb,
+    job_status provisioner_job_status GENERATED ALWAYS AS (
+CASE
+    WHEN (completed_at IS NOT NULL) THEN
+    CASE
+        WHEN (error <> ''::text) THEN 'failed'::provisioner_job_status
+        WHEN (canceled_at IS NOT NULL) THEN 'canceled'::provisioner_job_status
+        ELSE 'succeeded'::provisioner_job_status
+    END
+    ELSE
+    CASE
+        WHEN (error <> ''::text) THEN 'failed'::provisioner_job_status
+        WHEN (canceled_at IS NOT NULL) THEN 'canceling'::provisioner_job_status
+        WHEN (started_at IS NULL) THEN 'pending'::provisioner_job_status
+        ELSE 'running'::provisioner_job_status
+    END
+END) STORED NOT NULL
 );
+
+COMMENT ON COLUMN provisioner_jobs.job_status IS 'Computed column to track the status of the job.';
 
 CREATE TABLE replicas (
     id uuid NOT NULL,
@@ -550,6 +620,21 @@ CREATE TABLE tailnet_coordinators (
 );
 
 COMMENT ON TABLE tailnet_coordinators IS 'We keep this separate from replicas in case we need to break the coordinator out into its own service';
+
+CREATE TABLE tailnet_peers (
+    id uuid NOT NULL,
+    coordinator_id uuid NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    node bytea NOT NULL,
+    status tailnet_status DEFAULT 'ok'::tailnet_status NOT NULL
+);
+
+CREATE TABLE tailnet_tunnels (
+    coordinator_id uuid NOT NULL,
+    src_id uuid NOT NULL,
+    dst_id uuid NOT NULL,
+    updated_at timestamp with time zone NOT NULL
+);
 
 CREATE TABLE template_version_parameters (
     template_version_id uuid NOT NULL,
@@ -640,7 +725,8 @@ CREATE TABLE template_versions (
     job_id uuid NOT NULL,
     created_by uuid NOT NULL,
     external_auth_providers text[],
-    message character varying(1048576) DEFAULT ''::character varying NOT NULL
+    message character varying(1048576) DEFAULT ''::character varying NOT NULL,
+    archived boolean DEFAULT false NOT NULL
 );
 
 COMMENT ON COLUMN template_versions.external_auth_providers IS 'IDs of External auth providers for a specific template version';
@@ -685,6 +771,7 @@ CREATE VIEW template_version_with_user AS
     template_versions.created_by,
     template_versions.external_auth_providers,
     template_versions.message,
+    template_versions.archived,
     COALESCE(visible_users.avatar_url, ''::text) AS created_by_avatar_url,
     COALESCE(visible_users.username, ''::text) AS created_by_username
    FROM (public.template_versions
@@ -716,7 +803,9 @@ CREATE TABLE templates (
     time_til_dormant bigint DEFAULT 0 NOT NULL,
     time_til_dormant_autodelete bigint DEFAULT 0 NOT NULL,
     autostop_requirement_days_of_week smallint DEFAULT 0 NOT NULL,
-    autostop_requirement_weeks bigint DEFAULT 0 NOT NULL
+    autostop_requirement_weeks bigint DEFAULT 0 NOT NULL,
+    autostart_block_days_of_week smallint DEFAULT 0 NOT NULL,
+    require_active_version boolean DEFAULT false NOT NULL
 );
 
 COMMENT ON COLUMN templates.default_ttl IS 'The default duration for autostop for workspaces created from this template.';
@@ -732,6 +821,8 @@ COMMENT ON COLUMN templates.allow_user_autostop IS 'Allow users to specify custo
 COMMENT ON COLUMN templates.autostop_requirement_days_of_week IS 'A bitmap of days of week to restart the workspace on, starting with Monday as the 0th bit, and Sunday as the 6th bit. The 7th bit is unused.';
 
 COMMENT ON COLUMN templates.autostop_requirement_weeks IS 'The number of weeks between restarts. 0 or 1 weeks means "every week", 2 week means "every second week", etc. Weeks are counted from January 2, 2023, which is the first Monday of 2023. This is to ensure workspaces are started consistently for all customers on the same n-week cycles.';
+
+COMMENT ON COLUMN templates.autostart_block_days_of_week IS 'A bitmap of days of week that autostart of a workspace is not allowed. Default allows all days. This is intended as a cost savings measure to prevent auto start on weekends (for example).';
 
 CREATE VIEW template_with_users AS
  SELECT templates.id,
@@ -758,6 +849,8 @@ CREATE VIEW template_with_users AS
     templates.time_til_dormant_autodelete,
     templates.autostop_requirement_days_of_week,
     templates.autostop_requirement_weeks,
+    templates.autostart_block_days_of_week,
+    templates.require_active_version,
     COALESCE(visible_users.avatar_url, ''::text) AS created_by_avatar_url,
     COALESCE(visible_users.username, ''::text) AS created_by_username
    FROM (public.templates
@@ -881,6 +974,7 @@ CREATE TABLE workspace_agents (
     ready_at timestamp with time zone,
     subsystems workspace_agent_subsystem[] DEFAULT '{}'::workspace_agent_subsystem[],
     display_apps display_app[] DEFAULT '{vscode,vscode_insiders,web_terminal,ssh_helper,port_forwarding_helper}'::display_app[],
+    api_version text DEFAULT ''::text NOT NULL,
     CONSTRAINT max_logs_length CHECK ((logs_length <= 1048576)),
     CONSTRAINT subsystems_not_none CHECK ((NOT ('none'::workspace_agent_subsystem = ANY (subsystems))))
 );
@@ -1097,7 +1191,8 @@ CREATE TABLE workspaces (
     ttl bigint,
     last_used_at timestamp with time zone DEFAULT '0001-01-01 00:00:00+00'::timestamp with time zone NOT NULL,
     dormant_at timestamp with time zone,
-    deleting_at timestamp with time zone
+    deleting_at timestamp with time zone,
+    automatic_updates automatic_updates DEFAULT 'never'::automatic_updates NOT NULL
 );
 
 ALTER TABLE ONLY licenses ALTER COLUMN id SET DEFAULT nextval('licenses_id_seq'::regclass);
@@ -1202,6 +1297,12 @@ ALTER TABLE ONLY tailnet_clients
 ALTER TABLE ONLY tailnet_coordinators
     ADD CONSTRAINT tailnet_coordinators_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY tailnet_peers
+    ADD CONSTRAINT tailnet_peers_pkey PRIMARY KEY (id, coordinator_id);
+
+ALTER TABLE ONLY tailnet_tunnels
+    ADD CONSTRAINT tailnet_tunnels_pkey PRIMARY KEY (coordinator_id, src_id, dst_id);
+
 ALTER TABLE ONLY template_version_parameters
     ADD CONSTRAINT template_version_parameters_template_version_id_name_key UNIQUE (template_version_id, name);
 
@@ -1305,6 +1406,8 @@ CREATE INDEX idx_tailnet_agents_coordinator ON tailnet_agents USING btree (coord
 
 CREATE INDEX idx_tailnet_clients_coordinator ON tailnet_clients USING btree (coordinator_id);
 
+CREATE INDEX idx_tailnet_peers_coordinator ON tailnet_peers USING btree (coordinator_id);
+
 CREATE UNIQUE INDEX idx_users_email ON users USING btree (email) WHERE (deleted = false);
 
 CREATE UNIQUE INDEX idx_users_username ON users USING btree (username) WHERE (deleted = false);
@@ -1321,7 +1424,7 @@ CREATE UNIQUE INDEX users_username_lower_idx ON users USING btree (lower(usernam
 
 CREATE INDEX workspace_agent_startup_logs_id_agent_id_idx ON workspace_agent_logs USING btree (agent_id, id);
 
-CREATE INDEX workspace_agent_stats_template_id_created_at_user_id_idx ON workspace_agent_stats USING btree (template_id, created_at DESC, user_id) WHERE (connection_count > 0);
+CREATE INDEX workspace_agent_stats_template_id_created_at_user_id_idx ON workspace_agent_stats USING btree (template_id, created_at, user_id) INCLUDE (session_count_vscode, session_count_jetbrains, session_count_reconnecting_pty, session_count_ssh, connection_median_latency_ms) WHERE (connection_count > 0);
 
 COMMENT ON INDEX workspace_agent_stats_template_id_created_at_user_id_idx IS 'Support index for template insights endpoint to build interval reports faster.';
 
@@ -1344,6 +1447,10 @@ CREATE TRIGGER tailnet_notify_client_change AFTER INSERT OR DELETE OR UPDATE ON 
 CREATE TRIGGER tailnet_notify_client_subscription_change AFTER INSERT OR DELETE OR UPDATE ON tailnet_client_subscriptions FOR EACH ROW EXECUTE FUNCTION tailnet_notify_client_subscription_change();
 
 CREATE TRIGGER tailnet_notify_coordinator_heartbeat AFTER INSERT OR UPDATE ON tailnet_coordinators FOR EACH ROW EXECUTE FUNCTION tailnet_notify_coordinator_heartbeat();
+
+CREATE TRIGGER tailnet_notify_peer_change AFTER INSERT OR DELETE OR UPDATE ON tailnet_peers FOR EACH ROW EXECUTE FUNCTION tailnet_notify_peer_change();
+
+CREATE TRIGGER tailnet_notify_tunnel_change AFTER INSERT OR DELETE OR UPDATE ON tailnet_tunnels FOR EACH ROW EXECUTE FUNCTION tailnet_notify_tunnel_change();
 
 CREATE TRIGGER trigger_insert_apikeys BEFORE INSERT ON api_keys FOR EACH ROW EXECUTE FUNCTION insert_apikey_fail_if_user_deleted();
 
@@ -1393,6 +1500,12 @@ ALTER TABLE ONLY tailnet_client_subscriptions
 
 ALTER TABLE ONLY tailnet_clients
     ADD CONSTRAINT tailnet_clients_coordinator_id_fkey FOREIGN KEY (coordinator_id) REFERENCES tailnet_coordinators(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tailnet_peers
+    ADD CONSTRAINT tailnet_peers_coordinator_id_fkey FOREIGN KEY (coordinator_id) REFERENCES tailnet_coordinators(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tailnet_tunnels
+    ADD CONSTRAINT tailnet_tunnels_coordinator_id_fkey FOREIGN KEY (coordinator_id) REFERENCES tailnet_coordinators(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY template_version_parameters
     ADD CONSTRAINT template_version_parameters_template_version_id_fkey FOREIGN KEY (template_version_id) REFERENCES template_versions(id) ON DELETE CASCADE;

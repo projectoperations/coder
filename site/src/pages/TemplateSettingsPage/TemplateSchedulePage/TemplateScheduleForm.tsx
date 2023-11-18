@@ -1,8 +1,18 @@
 import TextField from "@mui/material/TextField";
-import { Template, UpdateTemplateMeta } from "api/typesGenerated";
+import MenuItem from "@mui/material/MenuItem";
+import Link from "@mui/material/Link";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Switch from "@mui/material/Switch";
 import { FormikTouched, useFormik } from "formik";
 import { FC, ChangeEvent, useState, useEffect } from "react";
+import { Template, UpdateTemplateMeta } from "api/typesGenerated";
 import { getFormHelpers } from "utils/formUtils";
+import { docs } from "utils/docs";
+import {
+  TemplateAutostartRequirementDaysValue,
+  calculateAutostopRequirementDaysValue,
+} from "utils/schedule";
 import {
   FormSection,
   HorizontalForm,
@@ -10,11 +20,6 @@ import {
   FormFields,
 } from "components/Form/Form";
 import { Stack } from "components/Stack/Stack";
-import { makeStyles } from "@mui/styles";
-import Link from "@mui/material/Link";
-import Checkbox from "@mui/material/Checkbox";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import Switch from "@mui/material/Switch";
 import {
   useWorkspacesToGoDormant,
   useWorkspacesToBeDeleted,
@@ -27,15 +32,14 @@ import {
   FailureTTLHelperText,
   MaxTTLHelperText,
 } from "./TTLHelperText";
-import { docs } from "utils/docs";
-import { ScheduleDialog } from "components/Dialogs/ConfirmDialog/ConfirmDialog";
-import MenuItem from "@mui/material/MenuItem";
+import { ScheduleDialog } from "./ScheduleDialog";
 import {
   AutostopRequirementDaysHelperText,
   AutostopRequirementWeeksHelperText,
-  calculateAutostopRequirementDaysValue,
   convertAutostopRequirementDaysValue,
 } from "./AutostopRequirementHelperText";
+import { useTheme } from "@emotion/react";
+import { TemplateScheduleAutostart } from "components/TemplateScheduleAutostart/TemplateScheduleAutostart";
 
 const MS_HOUR_CONVERSION = 3600000;
 const MS_DAY_CONVERSION = 86400000;
@@ -97,6 +101,8 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
           ? template.autostop_requirement.weeks
           : 1
         : 1,
+      autostart_requirement_days_of_week: template.autostart_requirement
+        .days_of_week as TemplateAutostartRequirementDaysValue[],
 
       allow_user_autostart: template.allow_user_autostart,
       allow_user_autostop: template.allow_user_autostop,
@@ -109,6 +115,7 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
         Boolean(template.time_til_dormant_autodelete_ms),
       update_workspace_last_used_at: false,
       update_workspace_dormant_at: false,
+      require_active_version: false,
     },
     validationSchema,
     onSubmit: () => {
@@ -145,7 +152,7 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
     form,
     error,
   );
-  const styles = useStyles();
+  const theme = useTheme();
 
   const now = new Date();
   const weekFromNow = new Date(now);
@@ -217,11 +224,15 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
         ),
         weeks: autostop_requirement_weeks,
       },
+      autostart_requirement: {
+        days_of_week: form.values.autostart_requirement_days_of_week,
+      },
 
       allow_user_autostart: form.values.allow_user_autostart,
       allow_user_autostop: form.values.allow_user_autostop,
       update_workspace_last_used_at: form.values.update_workspace_last_used_at,
       update_workspace_dormant_at: form.values.update_workspace_dormant_at,
+      require_active_version: false,
     });
   };
 
@@ -315,7 +326,7 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
         title="Schedule"
         description="Define when workspaces created from this template are stopped."
       >
-        <Stack direction="row" className={styles.ttlFields}>
+        <Stack direction="row" css={styles.ttlFields}>
           <TextField
             {...getFieldHelpers(
               "default_ttl_ms",
@@ -356,7 +367,7 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
           title="Autostop Requirement"
           description="Define when workspaces created from this template are stopped periodically to enforce template updates and ensure idle workspaces are stopped."
         >
-          <Stack direction="row" className={styles.ttlFields}>
+          <Stack direction="row" css={styles.ttlFields}>
             <TextField
               {...getFieldHelpers(
                 "autostop_requirement_days_of_week",
@@ -432,6 +443,24 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
               </strong>
             </Stack>
           </Stack>
+          {allowAdvancedScheduling && (
+            <TemplateScheduleAutostart
+              allow_user_autostart={form.values.allow_user_autostart}
+              autostart_requirement_days_of_week={
+                form.values.autostart_requirement_days_of_week
+              }
+              isSubmitting={isSubmitting}
+              onChange={async (
+                newDaysOfWeek: TemplateAutostartRequirementDaysValue[],
+              ) => {
+                await form.setFieldValue(
+                  "autostart_requirement_days_of_week",
+                  newDaysOfWeek,
+                );
+              }}
+            />
+          )}
+
           <Stack direction="row" alignItems="center">
             <Checkbox
               id="allow-user-autostop"
@@ -450,7 +479,12 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
               <strong>
                 Allow users to customize autostop duration for workspaces.
               </strong>
-              <span className={styles.optionDescription}>
+              <span
+                css={{
+                  fontSize: 12,
+                  color: theme.palette.text.secondary,
+                }}
+              >
                 Workspaces will always use the default TTL if this is set.
                 Regardless of this setting, workspaces can only stay on for the
                 max lifetime.
@@ -616,12 +650,11 @@ export const TemplateScheduleForm: FC<TemplateScheduleForm> = ({
   );
 };
 
-const useStyles = makeStyles((theme) => ({
+const styles = {
   ttlFields: {
     width: "100%",
   },
-  optionDescription: {
-    fontSize: 12,
-    color: theme.palette.text.secondary,
+  dayButtons: {
+    borderRadius: "0px",
   },
-}));
+};

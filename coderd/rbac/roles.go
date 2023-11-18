@@ -143,7 +143,7 @@ func ReloadBuiltinRoles(opts *RoleOptions) {
 
 	memberRole := Role{
 		Name:        member,
-		DisplayName: "",
+		DisplayName: "Member",
 		Site: Permissions(map[string][]Action{
 			ResourceRoleAssignment.Type: {ActionRead},
 			// All users can see the provisioner daemons.
@@ -206,6 +206,7 @@ func ReloadBuiltinRoles(opts *RoleOptions) {
 		Site: Permissions(map[string][]Action{
 			ResourceRoleAssignment.Type: {ActionCreate, ActionRead, ActionUpdate, ActionDelete},
 			ResourceUser.Type:           {ActionCreate, ActionRead, ActionUpdate, ActionDelete},
+			ResourceUserData.Type:       {ActionCreate, ActionRead, ActionUpdate, ActionDelete},
 			// Full perms to manage org members
 			ResourceOrganizationMember.Type: {ActionCreate, ActionRead, ActionUpdate, ActionDelete},
 			ResourceGroup.Type:              {ActionCreate, ActionRead, ActionUpdate, ActionDelete},

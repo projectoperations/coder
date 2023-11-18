@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/gliderlabs/ssh"
+	"github.com/google/uuid"
+	"github.com/kballard/go-shellquote"
 	"github.com/pkg/sftp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
@@ -191,9 +193,16 @@ func (s *Server) ConnStats() ConnStats {
 }
 
 func (s *Server) sessionHandler(session ssh.Session) {
-	logger := s.logger.With(slog.F("remote_addr", session.RemoteAddr()), slog.F("local_addr", session.LocalAddr()))
-	logger.Info(session.Context(), "handling ssh session")
 	ctx := session.Context()
+	logger := s.logger.With(
+		slog.F("remote_addr", session.RemoteAddr()),
+		slog.F("local_addr", session.LocalAddr()),
+		// Assigning a random uuid for each session is useful for tracking
+		// logs for the same ssh session.
+		slog.F("id", uuid.NewString()),
+	)
+	logger.Info(ctx, "handling ssh session")
+
 	if !s.trackSession(session, true) {
 		// See (*Server).Close() for why we call Close instead of Exit.
 		_ = session.Close()
@@ -217,7 +226,7 @@ func (s *Server) sessionHandler(session ssh.Session) {
 	switch ss := session.Subsystem(); ss {
 	case "":
 	case "sftp":
-		s.sftpHandler(session)
+		s.sftpHandler(logger, session)
 		return
 	default:
 		logger.Warn(ctx, "unsupported subsystem", slog.F("subsystem", ss))
@@ -225,7 +234,7 @@ func (s *Server) sessionHandler(session ssh.Session) {
 		return
 	}
 
-	err := s.sessionStart(session, extraEnv)
+	err := s.sessionStart(logger, session, extraEnv)
 	var exitError *exec.ExitError
 	if xerrors.As(err, &exitError) {
 		logger.Info(ctx, "ssh session returned", slog.Error(exitError))
@@ -243,7 +252,7 @@ func (s *Server) sessionHandler(session ssh.Session) {
 	_ = session.Exit(0)
 }
 
-func (s *Server) sessionStart(session ssh.Session, extraEnv []string) (retErr error) {
+func (s *Server) sessionStart(logger slog.Logger, session ssh.Session, extraEnv []string) (retErr error) {
 	ctx := session.Context()
 	env := append(session.Environ(), extraEnv...)
 	var magicType string
@@ -251,23 +260,23 @@ func (s *Server) sessionStart(session ssh.Session, extraEnv []string) (retErr er
 		if !strings.HasPrefix(kv, MagicSessionTypeEnvironmentVariable) {
 			continue
 		}
-		magicType = strings.TrimPrefix(kv, MagicSessionTypeEnvironmentVariable+"=")
+		magicType = strings.ToLower(strings.TrimPrefix(kv, MagicSessionTypeEnvironmentVariable+"="))
 		env = append(env[:index], env[index+1:]...)
 	}
 
 	// Always force lowercase checking to be case-insensitive.
-	switch strings.ToLower(magicType) {
-	case strings.ToLower(MagicSessionTypeVSCode):
+	switch magicType {
+	case MagicSessionTypeVSCode:
 		s.connCountVSCode.Add(1)
 		defer s.connCountVSCode.Add(-1)
-	case strings.ToLower(MagicSessionTypeJetBrains):
+	case MagicSessionTypeJetBrains:
 		s.connCountJetBrains.Add(1)
 		defer s.connCountJetBrains.Add(-1)
 	case "":
 		s.connCountSSHSession.Add(1)
 		defer s.connCountSSHSession.Add(-1)
 	default:
-		s.logger.Warn(ctx, "invalid magic ssh session type specified", slog.F("type", magicType))
+		logger.Warn(ctx, "invalid magic ssh session type specified", slog.F("type", magicType))
 	}
 
 	magicTypeLabel := magicTypeMetricLabel(magicType)
@@ -300,7 +309,7 @@ func (s *Server) sessionStart(session ssh.Session, extraEnv []string) (retErr er
 	}
 
 	if isPty {
-		return s.startPTYSession(session, magicTypeLabel, cmd, sshPty, windowSize)
+		return s.startPTYSession(logger, session, magicTypeLabel, cmd, sshPty, windowSize)
 	}
 	return s.startNonPTYSession(session, magicTypeLabel, cmd.AsExec())
 }
@@ -341,7 +350,7 @@ type ptySession interface {
 	RawCommand() string
 }
 
-func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd *pty.Cmd, sshPty ssh.Pty, windowSize <-chan ssh.Window) (retErr error) {
+func (s *Server) startPTYSession(logger slog.Logger, session ptySession, magicTypeLabel string, cmd *pty.Cmd, sshPty ssh.Pty, windowSize <-chan ssh.Window) (retErr error) {
 	s.metrics.sessionsTotal.WithLabelValues(magicTypeLabel, "yes").Add(1)
 
 	ctx := session.Context()
@@ -354,7 +363,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 		if serviceBanner != nil {
 			err := showServiceBanner(session, serviceBanner)
 			if err != nil {
-				s.logger.Error(ctx, "agent failed to show service banner", slog.Error(err))
+				logger.Error(ctx, "agent failed to show service banner", slog.Error(err))
 				s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "service_banner").Add(1)
 			}
 		}
@@ -365,11 +374,11 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 		if manifest != nil {
 			err := showMOTD(s.fs, session, manifest.MOTDFile)
 			if err != nil {
-				s.logger.Error(ctx, "agent failed to show MOTD", slog.Error(err))
+				logger.Error(ctx, "agent failed to show MOTD", slog.Error(err))
 				s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "motd").Add(1)
 			}
 		} else {
-			s.logger.Warn(ctx, "metadata lookup failed, unable to show MOTD")
+			logger.Warn(ctx, "metadata lookup failed, unable to show MOTD")
 		}
 	}
 
@@ -378,7 +387,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 	// The pty package sets `SSH_TTY` on supported platforms.
 	ptty, process, err := pty.Start(cmd, pty.WithPTYOption(
 		pty.WithSSHRequest(sshPty),
-		pty.WithLogger(slog.Stdlib(ctx, s.logger, slog.LevelInfo)),
+		pty.WithLogger(slog.Stdlib(ctx, logger, slog.LevelInfo)),
 	))
 	if err != nil {
 		s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "start_command").Add(1)
@@ -387,7 +396,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 	defer func() {
 		closeErr := ptty.Close()
 		if closeErr != nil {
-			s.logger.Warn(ctx, "failed to close tty", slog.Error(closeErr))
+			logger.Warn(ctx, "failed to close tty", slog.Error(closeErr))
 			s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "close").Add(1)
 			if retErr == nil {
 				retErr = closeErr
@@ -399,7 +408,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 			resizeErr := ptty.Resize(uint16(win.Height), uint16(win.Width))
 			// If the pty is closed, then command has exited, no need to log.
 			if resizeErr != nil && !errors.Is(resizeErr, pty.ErrClosed) {
-				s.logger.Warn(ctx, "failed to resize tty", slog.Error(resizeErr))
+				logger.Warn(ctx, "failed to resize tty", slog.Error(resizeErr))
 				s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "resize").Add(1)
 			}
 		}
@@ -421,7 +430,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 	// 2. The client hangs up, which cancels the command's Context, and go will
 	//    kill the command's process.  This then has the same effect as (1).
 	n, err := io.Copy(session, ptty.OutputReader())
-	s.logger.Debug(ctx, "copy output done", slog.F("bytes", n), slog.Error(err))
+	logger.Debug(ctx, "copy output done", slog.F("bytes", n), slog.Error(err))
 	if err != nil {
 		s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "output_io_copy").Add(1)
 		return xerrors.Errorf("copy error: %w", err)
@@ -434,7 +443,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 	// ExitErrors just mean the command we run returned a non-zero exit code, which is normal
 	// and not something to be concerned about.  But, if it's something else, we should log it.
 	if err != nil && !xerrors.As(err, &exitErr) {
-		s.logger.Warn(ctx, "process wait exited with error", slog.Error(err))
+		logger.Warn(ctx, "process wait exited with error", slog.Error(err))
 		s.metrics.sessionErrors.WithLabelValues(magicTypeLabel, "yes", "wait").Add(1)
 	}
 	if err != nil {
@@ -443,7 +452,7 @@ func (s *Server) startPTYSession(session ptySession, magicTypeLabel string, cmd 
 	return nil
 }
 
-func (s *Server) sftpHandler(session ssh.Session) {
+func (s *Server) sftpHandler(logger slog.Logger, session ssh.Session) {
 	s.metrics.sftpConnectionsTotal.Add(1)
 
 	ctx := session.Context()
@@ -459,14 +468,14 @@ func (s *Server) sftpHandler(session ssh.Session) {
 	// directory so that SFTP connections land there.
 	homedir, err := userHomeDir()
 	if err != nil {
-		s.logger.Warn(ctx, "get sftp working directory failed, unable to get home dir", slog.Error(err))
+		logger.Warn(ctx, "get sftp working directory failed, unable to get home dir", slog.Error(err))
 	} else {
 		opts = append(opts, sftp.WithServerWorkingDirectory(homedir))
 	}
 
 	server, err := sftp.NewServer(session, opts...)
 	if err != nil {
-		s.logger.Debug(ctx, "initialize sftp server", slog.Error(err))
+		logger.Debug(ctx, "initialize sftp server", slog.Error(err))
 		return
 	}
 	defer server.Close()
@@ -484,7 +493,7 @@ func (s *Server) sftpHandler(session ssh.Session) {
 		_ = session.Exit(0)
 		return
 	}
-	s.logger.Warn(ctx, "sftp server closed with error", slog.Error(err))
+	logger.Warn(ctx, "sftp server closed with error", slog.Error(err))
 	s.metrics.sftpServerErrors.Add(1)
 	_ = session.Exit(1)
 }
@@ -515,7 +524,31 @@ func (s *Server) CreateCommand(ctx context.Context, script string, env []string)
 	if runtime.GOOS == "windows" {
 		caller = "/c"
 	}
+	name := shell
 	args := []string{caller, script}
+
+	// A preceding space is generally not idiomatic for a shebang,
+	// but in Terraform it's quite standard to use <<EOF for a multi-line
+	// string which would indent with spaces, so we accept it for user-ease.
+	if strings.HasPrefix(strings.TrimSpace(script), "#!") {
+		// If the script starts with a shebang, we should
+		// execute it directly. This is useful for running
+		// scripts that aren't executable.
+		shebang := strings.SplitN(strings.TrimSpace(script), "\n", 2)[0]
+		shebang = strings.TrimSpace(shebang)
+		shebang = strings.TrimPrefix(shebang, "#!")
+		words, err := shellquote.Split(shebang)
+		if err != nil {
+			return nil, xerrors.Errorf("split shebang: %w", err)
+		}
+		name = words[0]
+		if len(words) > 1 {
+			args = words[1:]
+		} else {
+			args = []string{}
+		}
+		args = append(args, caller, script)
+	}
 
 	// gliderlabs/ssh returns a command slice of zero
 	// when a shell is requested.
@@ -528,7 +561,7 @@ func (s *Server) CreateCommand(ctx context.Context, script string, env []string)
 		}
 	}
 
-	cmd := pty.CommandContext(ctx, shell, args...)
+	cmd := pty.CommandContext(ctx, name, args...)
 	cmd.Dir = manifest.Directory
 
 	// If the metadata directory doesn't exist, we run the command

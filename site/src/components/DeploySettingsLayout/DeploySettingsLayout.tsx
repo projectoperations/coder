@@ -7,7 +7,7 @@ import { RequirePermission } from "components/RequirePermission/RequirePermissio
 import { usePermissions } from "hooks/usePermissions";
 import { Outlet } from "react-router-dom";
 import { DeploymentConfig } from "api/api";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "react-query";
 import { deploymentConfig } from "api/queries/deployment";
 
 type DeploySettingsContextValue = {
@@ -35,11 +35,7 @@ export const DeploySettingsLayout: FC = () => {
   return (
     <RequirePermission isFeatureVisible={permissions.viewDeploymentValues}>
       <Margins>
-        <Stack
-          css={(theme) => ({ padding: theme.spacing(6, 0) })}
-          direction="row"
-          spacing={6}
-        >
+        <Stack css={{ padding: "48px 0" }} direction="row" spacing={6}>
           <Sidebar />
           <main css={{ maxWidth: 800, width: "100%" }}>
             {deploymentConfigQuery.data ? (

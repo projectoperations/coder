@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/slogtest"
 
 	"github.com/coder/coder/v2/coderd/autobuild"
@@ -22,6 +23,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisioner/echo"
 	"github.com/coder/coder/v2/provisionersdk/proto"
+	"github.com/coder/coder/v2/testutil"
 )
 
 func TestExecutorAutostartOK(t *testing.T) {
@@ -59,55 +61,140 @@ func TestExecutorAutostartOK(t *testing.T) {
 
 	workspace = coderdtest.MustWorkspace(t, client, workspace.ID)
 	assert.Equal(t, codersdk.BuildReasonAutostart, workspace.LatestBuild.Reason)
+	// Assert some template props. If this is not set correctly, the test
+	// will fail.
+	ctx := testutil.Context(t, testutil.WaitShort)
+	template, err := client.Template(ctx, workspace.TemplateID)
+	require.NoError(t, err)
+	require.Equal(t, template.AutostartRequirement.DaysOfWeek, []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"})
 }
 
 func TestExecutorAutostartTemplateUpdated(t *testing.T) {
 	t.Parallel()
 
-	var (
-		sched   = mustSchedule(t, "CRON_TZ=UTC 0 * * * *")
-		ctx     = context.Background()
-		err     error
-		tickCh  = make(chan time.Time)
-		statsCh = make(chan autobuild.Stats)
-		client  = coderdtest.New(t, &coderdtest.Options{
-			AutobuildTicker:          tickCh,
-			IncludeProvisionerDaemon: true,
-			AutobuildStats:           statsCh,
+	testCases := []struct {
+		name                 string
+		automaticUpdates     codersdk.AutomaticUpdates
+		compatibleParameters bool
+		expectStart          bool
+		expectUpdate         bool
+	}{
+		{
+			name:                 "Never",
+			automaticUpdates:     codersdk.AutomaticUpdatesNever,
+			compatibleParameters: true,
+			expectStart:          true,
+			expectUpdate:         false,
+		},
+		{
+			name:                 "Always_Compatible",
+			automaticUpdates:     codersdk.AutomaticUpdatesAlways,
+			compatibleParameters: true,
+			expectStart:          true,
+			expectUpdate:         true,
+		},
+		{
+			name:                 "Always_Incompatible",
+			automaticUpdates:     codersdk.AutomaticUpdatesAlways,
+			compatibleParameters: false,
+			expectStart:          false,
+			expectUpdate:         false,
+		},
+	}
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var (
+				sched   = mustSchedule(t, "CRON_TZ=UTC 0 * * * *")
+				ctx     = context.Background()
+				err     error
+				tickCh  = make(chan time.Time)
+				statsCh = make(chan autobuild.Stats)
+				logger  = slogtest.Make(t, &slogtest.Options{IgnoreErrors: !tc.expectStart}).Leveled(slog.LevelDebug)
+				client  = coderdtest.New(t, &coderdtest.Options{
+					AutobuildTicker:          tickCh,
+					IncludeProvisionerDaemon: true,
+					AutobuildStats:           statsCh,
+					Logger:                   &logger,
+				})
+				// Given: we have a user with a workspace that has autostart enabled
+				workspace = mustProvisionWorkspace(t, client, func(cwr *codersdk.CreateWorkspaceRequest) {
+					cwr.AutostartSchedule = ptr.Ref(sched.String())
+					// Given: automatic updates from the test case
+					cwr.AutomaticUpdates = tc.automaticUpdates
+				})
+			)
+			// Given: workspace is stopped
+			workspace = coderdtest.MustTransitionWorkspace(
+				t, client, workspace.ID, database.WorkspaceTransitionStart, database.WorkspaceTransitionStop)
+
+			orgs, err := client.OrganizationsByUser(ctx, workspace.OwnerID.String())
+			require.NoError(t, err)
+			require.Len(t, orgs, 1)
+
+			var res *echo.Responses
+			if !tc.compatibleParameters {
+				// Given, parameters of the new version are not compatible.
+				// Since initial version has no parameters, any parameters in the new version will be incompatible
+				res = &echo.Responses{
+					Parse: echo.ParseComplete,
+					ProvisionApply: []*proto.Response{{
+						Type: &proto.Response_Apply{
+							Apply: &proto.ApplyComplete{
+								Parameters: []*proto.RichParameter{
+									{
+										Name:     "new",
+										Mutable:  false,
+										Required: true,
+									},
+								},
+							},
+						},
+					}},
+				}
+			}
+
+			// Given: the workspace template has been updated
+			newVersion := coderdtest.UpdateTemplateVersion(t, client, orgs[0].ID, res, workspace.TemplateID)
+			coderdtest.AwaitTemplateVersionJobCompleted(t, client, newVersion.ID)
+			require.NoError(t, client.UpdateActiveTemplateVersion(
+				ctx, workspace.TemplateID, codersdk.UpdateActiveTemplateVersion{
+					ID: newVersion.ID,
+				},
+			))
+
+			t.Log("sending autobuild tick")
+			// When: the autobuild executor ticks after the scheduled time
+			go func() {
+				tickCh <- sched.Next(workspace.LatestBuild.CreatedAt)
+				close(tickCh)
+			}()
+
+			stats := <-statsCh
+			assert.NoError(t, stats.Error)
+			if !tc.expectStart {
+				// Then: the workspace should not be started
+				assert.Len(t, stats.Transitions, 0)
+				return
+			}
+
+			// Then: the workspace should be started
+			assert.Len(t, stats.Transitions, 1)
+			assert.Contains(t, stats.Transitions, workspace.ID)
+			assert.Equal(t, database.WorkspaceTransitionStart, stats.Transitions[workspace.ID])
+			ws := coderdtest.MustWorkspace(t, client, workspace.ID)
+			if tc.expectUpdate {
+				// Then: uses the updated version
+				assert.Equal(t, newVersion.ID, ws.LatestBuild.TemplateVersionID,
+					"expected workspace build to be using the updated template version")
+			} else {
+				// Then: uses the previous template version
+				assert.Equal(t, workspace.LatestBuild.TemplateVersionID, ws.LatestBuild.TemplateVersionID,
+					"expected workspace build to be using the old template version")
+			}
 		})
-		// Given: we have a user with a workspace that has autostart enabled
-		workspace = mustProvisionWorkspace(t, client, func(cwr *codersdk.CreateWorkspaceRequest) {
-			cwr.AutostartSchedule = ptr.Ref(sched.String())
-		})
-	)
-	// Given: workspace is stopped
-	workspace = coderdtest.MustTransitionWorkspace(t, client, workspace.ID, database.WorkspaceTransitionStart, database.WorkspaceTransitionStop)
-
-	// Given: the workspace template has been updated
-	orgs, err := client.OrganizationsByUser(ctx, workspace.OwnerID.String())
-	require.NoError(t, err)
-	require.Len(t, orgs, 1)
-
-	newVersion := coderdtest.UpdateTemplateVersion(t, client, orgs[0].ID, nil, workspace.TemplateID)
-	coderdtest.AwaitTemplateVersionJobCompleted(t, client, newVersion.ID)
-	require.NoError(t, client.UpdateActiveTemplateVersion(ctx, workspace.TemplateID, codersdk.UpdateActiveTemplateVersion{
-		ID: newVersion.ID,
-	}))
-
-	// When: the autobuild executor ticks after the scheduled time
-	go func() {
-		tickCh <- sched.Next(workspace.LatestBuild.CreatedAt)
-		close(tickCh)
-	}()
-
-	// Then: the workspace should be started using the previous template version, and not the updated version.
-	stats := <-statsCh
-	assert.NoError(t, stats.Error)
-	assert.Len(t, stats.Transitions, 1)
-	assert.Contains(t, stats.Transitions, workspace.ID)
-	assert.Equal(t, database.WorkspaceTransitionStart, stats.Transitions[workspace.ID])
-	ws := coderdtest.MustWorkspace(t, client, workspace.ID)
-	assert.Equal(t, workspace.LatestBuild.TemplateVersionID, ws.LatestBuild.TemplateVersionID, "expected workspace build to be using the old template version")
+	}
 }
 
 func TestExecutorAutostartAlreadyRunning(t *testing.T) {
@@ -300,7 +387,6 @@ func TestExecutorAutostopNotEnabled(t *testing.T) {
 	t.Parallel()
 
 	var (
-		ctx     = context.Background()
 		tickCh  = make(chan time.Time)
 		statsCh = make(chan autobuild.Stats)
 		client  = coderdtest.New(t, &coderdtest.Options{
@@ -309,26 +395,23 @@ func TestExecutorAutostopNotEnabled(t *testing.T) {
 			AutobuildStats:           statsCh,
 		})
 		// Given: we have a user with a workspace
-		workspace = mustProvisionWorkspace(t, client)
+		workspace = mustProvisionWorkspace(t, client, func(cwr *codersdk.CreateWorkspaceRequest) {
+			cwr.TTLMillis = nil
+		})
 	)
 
 	// Given: workspace has no TTL set
-	err := client.UpdateWorkspaceTTL(ctx, workspace.ID, codersdk.UpdateWorkspaceTTLRequest{TTLMillis: nil})
-	require.NoError(t, err)
-	workspace, err = client.Workspace(ctx, workspace.ID)
-	require.NoError(t, err)
+	workspace = coderdtest.MustWorkspace(t, client, workspace.ID)
 	require.Nil(t, workspace.TTLMillis)
-
-	// TODO(cian): need to stop and start the workspace as we do not update the deadline. See: #2229
-	coderdtest.MustTransitionWorkspace(t, client, workspace.ID, database.WorkspaceTransitionStart, database.WorkspaceTransitionStop)
-	coderdtest.MustTransitionWorkspace(t, client, workspace.ID, database.WorkspaceTransitionStop, database.WorkspaceTransitionStart)
+	require.Zero(t, workspace.LatestBuild.Deadline)
+	require.NotZero(t, workspace.LatestBuild.Job.CompletedAt)
 
 	// Given: workspace is running
 	require.Equal(t, codersdk.WorkspaceTransitionStart, workspace.LatestBuild.Transition)
 
-	// When: the autobuild executor ticks past the TTL
+	// When: the autobuild executor ticks a year in the future
 	go func() {
-		tickCh <- workspace.LatestBuild.Deadline.Time.Add(time.Minute)
+		tickCh <- workspace.LatestBuild.Job.CompletedAt.AddDate(1, 0, 0)
 		close(tickCh)
 	}()
 
@@ -417,6 +500,10 @@ func TestExecutorWorkspaceAutostopBeforeDeadline(t *testing.T) {
 		// Given: we have a user with a workspace
 		workspace = mustProvisionWorkspace(t, client)
 	)
+
+	// Given: workspace is running and has a non-zero deadline
+	require.Equal(t, codersdk.WorkspaceTransitionStart, workspace.LatestBuild.Transition)
+	require.NotZero(t, workspace.LatestBuild.Deadline)
 
 	// When: the autobuild executor ticks before the TTL
 	go func() {
@@ -649,6 +736,112 @@ func TestExecutorAutostartTemplateDisabled(t *testing.T) {
 	stats := <-statsCh
 	assert.NoError(t, stats.Error)
 	assert.Len(t, stats.Transitions, 0)
+}
+
+func TestExecutorAutostopTemplateDisabled(t *testing.T) {
+	t.Parallel()
+
+	// Given: we have a workspace built from a template that disallows user autostop
+	var (
+		tickCh  = make(chan time.Time)
+		statsCh = make(chan autobuild.Stats)
+
+		client = coderdtest.New(t, &coderdtest.Options{
+			AutobuildTicker:          tickCh,
+			IncludeProvisionerDaemon: true,
+			AutobuildStats:           statsCh,
+			// We are using a mock store here as the AGPL store does not implement this.
+			TemplateScheduleStore: schedule.MockTemplateScheduleStore{
+				GetFn: func(_ context.Context, _ database.Store, _ uuid.UUID) (schedule.TemplateScheduleOptions, error) {
+					return schedule.TemplateScheduleOptions{
+						UserAutostopEnabled: false,
+						DefaultTTL:          time.Hour,
+					}, nil
+				},
+			},
+		})
+		// Given: we have a user with a workspace configured to autostop 30 minutes in the future
+		workspace = mustProvisionWorkspace(t, client, func(cwr *codersdk.CreateWorkspaceRequest) {
+			cwr.TTLMillis = ptr.Ref(30 * time.Minute.Milliseconds())
+		})
+	)
+
+	// When: we create the workspace
+	// Then: the deadline should be set to the template default TTL
+	assert.WithinDuration(t, workspace.LatestBuild.CreatedAt.Add(time.Hour), workspace.LatestBuild.Deadline.Time, time.Minute)
+
+	// When: the autobuild executor ticks after the workspace setting, but before the template setting:
+	go func() {
+		tickCh <- workspace.LatestBuild.CreatedAt.Add(45 * time.Minute)
+	}()
+
+	// Then: nothing should happen
+	stats := <-statsCh
+	assert.NoError(t, stats.Error)
+	assert.Len(t, stats.Transitions, 0)
+
+	// When: the autobuild executor ticks after the template setting:
+	go func() {
+		tickCh <- workspace.LatestBuild.CreatedAt.Add(61 * time.Minute)
+		close(tickCh)
+	}()
+
+	// Then: the workspace should be stopped
+	stats = <-statsCh
+	assert.NoError(t, stats.Error)
+	assert.Len(t, stats.Transitions, 1)
+	assert.Contains(t, stats.Transitions, workspace.ID)
+	assert.Equal(t, database.WorkspaceTransitionStop, stats.Transitions[workspace.ID])
+}
+
+// Test that an AGPL AccessControlStore properly disables
+// functionality.
+func TestExecutorRequireActiveVersion(t *testing.T) {
+	t.Parallel()
+
+	var (
+		sched  = mustSchedule(t, "CRON_TZ=UTC 0 * * * *")
+		ticker = make(chan time.Time)
+		statCh = make(chan autobuild.Stats)
+
+		ownerClient = coderdtest.New(t, &coderdtest.Options{
+			AutobuildTicker:          ticker,
+			IncludeProvisionerDaemon: true,
+			AutobuildStats:           statCh,
+			TemplateScheduleStore:    schedule.NewAGPLTemplateScheduleStore(),
+		})
+	)
+	owner := coderdtest.CreateFirstUser(t, ownerClient)
+
+	// Create an active and inactive template version. We'll
+	// build a regular member's workspace using a non-active
+	// template version and assert that the field is not abided
+	// since there is no enterprise license.
+	activeVersion := coderdtest.CreateTemplateVersion(t, ownerClient, owner.OrganizationID, nil)
+	template := coderdtest.CreateTemplate(t, ownerClient, owner.OrganizationID, activeVersion.ID, func(ctr *codersdk.CreateTemplateRequest) {
+		ctr.RequireActiveVersion = true
+		ctr.VersionID = activeVersion.ID
+	})
+	inactiveVersion := coderdtest.CreateTemplateVersion(t, ownerClient, owner.OrganizationID, nil, func(ctvr *codersdk.CreateTemplateVersionRequest) {
+		ctvr.TemplateID = template.ID
+	})
+	coderdtest.AwaitTemplateVersionJobCompleted(t, ownerClient, activeVersion.ID)
+	memberClient, _ := coderdtest.CreateAnotherUser(t, ownerClient, owner.OrganizationID)
+	ws := coderdtest.CreateWorkspace(t, memberClient, owner.OrganizationID, uuid.Nil, func(cwr *codersdk.CreateWorkspaceRequest) {
+		cwr.TemplateVersionID = inactiveVersion.ID
+		cwr.AutostartSchedule = ptr.Ref(sched.String())
+	})
+	_ = coderdtest.AwaitWorkspaceBuildJobCompleted(t, ownerClient, ws.LatestBuild.ID)
+	ws = coderdtest.MustTransitionWorkspace(t, memberClient, ws.ID, database.WorkspaceTransitionStart, database.WorkspaceTransitionStop, func(req *codersdk.CreateWorkspaceBuildRequest) {
+		req.TemplateVersionID = inactiveVersion.ID
+	})
+	require.Equal(t, inactiveVersion.ID, ws.LatestBuild.TemplateVersionID)
+	ticker <- sched.Next(ws.LatestBuild.CreatedAt)
+	stats := <-statCh
+	require.Len(t, stats.Transitions, 1)
+
+	ws = coderdtest.MustWorkspace(t, memberClient, ws.ID)
+	require.Equal(t, inactiveVersion.ID, ws.LatestBuild.TemplateVersionID)
 }
 
 // TestExecutorFailedWorkspace test AGPL functionality which mainly

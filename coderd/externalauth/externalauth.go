@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/xerrors"
 
 	"github.com/google/go-github/v43/github"
+	"github.com/sqlc-dev/pqtype"
 	xgithub "golang.org/x/oauth2/github"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -44,6 +46,14 @@ type Config struct {
 	// DisplayIcon is the path to an image that will be displayed to the user.
 	DisplayIcon string
 
+	// ExtraTokenKeys is a list of extra properties to
+	// store in the database returned from the token endpoint.
+	//
+	// e.g. Slack returns `authed_user` in the token which is
+	// a payload that contains information about the authenticated
+	// user.
+	ExtraTokenKeys []string
+
 	// NoRefresh stops Coder from using the refresh token
 	// to renew the access token.
 	//
@@ -67,6 +77,25 @@ type Config struct {
 	// AppInstallationsURL is an API endpoint that returns a list of
 	// installations for the user. This is used for GitHub Apps.
 	AppInstallationsURL string
+}
+
+// GenerateTokenExtra generates the extra token data to store in the database.
+func (c *Config) GenerateTokenExtra(token *oauth2.Token) (pqtype.NullRawMessage, error) {
+	if len(c.ExtraTokenKeys) == 0 {
+		return pqtype.NullRawMessage{}, nil
+	}
+	extraMap := map[string]interface{}{}
+	for _, key := range c.ExtraTokenKeys {
+		extraMap[key] = token.Extra(key)
+	}
+	data, err := json.Marshal(extraMap)
+	if err != nil {
+		return pqtype.NullRawMessage{}, err
+	}
+	return pqtype.NullRawMessage{
+		RawMessage: data,
+		Valid:      true,
+	}, nil
 }
 
 // RefreshToken automatically refreshes the token if expired and permitted.
@@ -101,6 +130,12 @@ func (c *Config) RefreshToken(ctx context.Context, db database.Store, externalAu
 		// we aren't trying to surface an error, we're just trying to obtain a valid token.
 		return externalAuthLink, false, nil
 	}
+
+	extra, err := c.GenerateTokenExtra(token)
+	if err != nil {
+		return externalAuthLink, false, xerrors.Errorf("generate token extra: %w", err)
+	}
+
 	r := retry.New(50*time.Millisecond, 200*time.Millisecond)
 	// See the comment below why the retry and cancel is required.
 	retryCtx, retryCtxCancel := context.WithTimeout(ctx, time.Second)
@@ -135,6 +170,7 @@ validate:
 			OAuthRefreshToken:      token.RefreshToken,
 			OAuthRefreshTokenKeyID: sql.NullString{}, // dbcrypt will update as required
 			OAuthExpiry:            token.Expiry,
+			OAuthExtra:             extra,
 		})
 		if err != nil {
 			return updatedAuthLink, false, xerrors.Errorf("update external auth link: %w", err)
@@ -422,6 +458,9 @@ func ConvertConfig(entries []codersdk.ExternalAuthConfig, accessURL *url.URL) ([
 		if entry.Type == string(codersdk.EnhancedExternalAuthProviderAzureDevops) {
 			oauthConfig = &jwtConfig{oc}
 		}
+		if entry.Type == string(codersdk.EnhancedExternalAuthProviderJFrog) {
+			oauthConfig = &exchangeWithClientSecret{oc}
+		}
 
 		cfg := &Config{
 			OAuth2Config:        oauthConfig,
@@ -434,6 +473,7 @@ func ConvertConfig(entries []codersdk.ExternalAuthConfig, accessURL *url.URL) ([
 			AppInstallURL:       entry.AppInstallURL,
 			DisplayName:         entry.DisplayName,
 			DisplayIcon:         entry.DisplayIcon,
+			ExtraTokenKeys:      entry.ExtraTokenKeys,
 		}
 
 		if entry.DeviceFlow {
@@ -455,7 +495,36 @@ func ConvertConfig(entries []codersdk.ExternalAuthConfig, accessURL *url.URL) ([
 
 // applyDefaultsToConfig applies defaults to the config entry.
 func applyDefaultsToConfig(config *codersdk.ExternalAuthConfig) {
-	defaults := defaults[codersdk.EnhancedExternalAuthProvider(config.Type)]
+	configType := codersdk.EnhancedExternalAuthProvider(config.Type)
+	if configType == "bitbucket" {
+		// For backwards compatibility, we need to support the "bitbucket" string.
+		configType = codersdk.EnhancedExternalAuthProviderBitBucketCloud
+		defer func() {
+			// The config type determines the config ID (if unset). So change the legacy
+			// type to the correct new type after the defaults have been configured.
+			config.Type = string(codersdk.EnhancedExternalAuthProviderBitBucketCloud)
+		}()
+	}
+	// If static defaults exist, apply them.
+	if defaults, ok := staticDefaults[configType]; ok {
+		copyDefaultSettings(config, defaults)
+		return
+	}
+
+	// Dynamic defaults
+	switch codersdk.EnhancedExternalAuthProvider(config.Type) {
+	case codersdk.EnhancedExternalAuthProviderBitBucketServer:
+		copyDefaultSettings(config, bitbucketServerDefaults(config))
+		return
+	default:
+		// No defaults for this type. We still want to run this apply with
+		// an empty set of defaults.
+		copyDefaultSettings(config, codersdk.ExternalAuthConfig{})
+		return
+	}
+}
+
+func copyDefaultSettings(config *codersdk.ExternalAuthConfig, defaults codersdk.ExternalAuthConfig) {
 	if config.AuthURL == "" {
 		config.AuthURL = defaults.AuthURL
 	}
@@ -486,6 +555,9 @@ func applyDefaultsToConfig(config *codersdk.ExternalAuthConfig) {
 	if config.DisplayIcon == "" {
 		config.DisplayIcon = defaults.DisplayIcon
 	}
+	if config.ExtraTokenKeys == nil || len(config.ExtraTokenKeys) == 0 {
+		config.ExtraTokenKeys = defaults.ExtraTokenKeys
+	}
 
 	// Apply defaults if it's still empty...
 	if config.ID == "" {
@@ -500,7 +572,43 @@ func applyDefaultsToConfig(config *codersdk.ExternalAuthConfig) {
 	}
 }
 
-var defaults = map[codersdk.EnhancedExternalAuthProvider]codersdk.ExternalAuthConfig{
+func bitbucketServerDefaults(config *codersdk.ExternalAuthConfig) codersdk.ExternalAuthConfig {
+	defaults := codersdk.ExternalAuthConfig{
+		DisplayName: "Bitbucket Server",
+		Scopes:      []string{"PUBLIC_REPOS", "REPO_READ", "REPO_WRITE"},
+		DisplayIcon: "/icon/bitbucket.svg",
+	}
+	// Bitbucket servers will have some base url, e.g. https://bitbucket.coder.com.
+	// We will grab this from the Auth URL. This choice is a bit arbitrary,
+	// but we need to require at least 1 field to be populated.
+	if config.AuthURL == "" {
+		// No auth url, means we cannot guess the urls.
+		return defaults
+	}
+
+	auth, err := url.Parse(config.AuthURL)
+	if err != nil {
+		// We need a valid URL to continue with.
+		return defaults
+	}
+
+	// Populate Regex, ValidateURL, and TokenURL.
+	// Default regex should be anything using the same host as the auth url.
+	defaults.Regex = fmt.Sprintf(`^(https?://)?%s(/.*)?$`, strings.ReplaceAll(auth.Host, ".", `\.`))
+
+	tokenURL := auth.ResolveReference(&url.URL{Path: "/rest/oauth2/latest/token"})
+	defaults.TokenURL = tokenURL.String()
+
+	// validate needs to return a 200 when logged in and a 401 when unauthenticated.
+	// This endpoint returns the count of the number of PR's in the authenticated
+	// user's inbox. Which will work perfectly for our use case.
+	validate := auth.ResolveReference(&url.URL{Path: "/rest/api/latest/inbox/pull-requests/count"})
+	defaults.ValidateURL = validate.String()
+
+	return defaults
+}
+
+var staticDefaults = map[codersdk.EnhancedExternalAuthProvider]codersdk.ExternalAuthConfig{
 	codersdk.EnhancedExternalAuthProviderAzureDevops: {
 		AuthURL:     "https://app.vssps.visualstudio.com/oauth2/authorize",
 		TokenURL:    "https://app.vssps.visualstudio.com/oauth2/token",
@@ -509,7 +617,7 @@ var defaults = map[codersdk.EnhancedExternalAuthProvider]codersdk.ExternalAuthCo
 		Regex:       `^(https?://)?dev\.azure\.com(/.*)?$`,
 		Scopes:      []string{"vso.code_write"},
 	},
-	codersdk.EnhancedExternalAuthProviderBitBucket: {
+	codersdk.EnhancedExternalAuthProviderBitBucketCloud: {
 		AuthURL:     "https://bitbucket.org/site/oauth2/authorize",
 		TokenURL:    "https://bitbucket.org/site/oauth2/access_token",
 		ValidateURL: "https://api.bitbucket.org/2.0/user",
@@ -538,6 +646,14 @@ var defaults = map[codersdk.EnhancedExternalAuthProvider]codersdk.ExternalAuthCo
 		Scopes:              []string{"repo", "workflow"},
 		DeviceCodeURL:       "https://github.com/login/device/code",
 		AppInstallationsURL: "https://api.github.com/user/installations",
+	},
+	codersdk.EnhancedExternalAuthProviderSlack: {
+		AuthURL:     "https://slack.com/oauth/v2/authorize",
+		TokenURL:    "https://slack.com/api/oauth.v2.access",
+		DisplayName: "Slack",
+		DisplayIcon: "/icon/slack.svg",
+		// See: https://api.slack.com/authentication/oauth-v2#exchanging
+		ExtraTokenKeys: []string{"authed_user"},
 	},
 }
 
@@ -571,4 +687,32 @@ func (c *jwtConfig) Exchange(ctx context.Context, code string, opts ...oauth2.Au
 			oauth2.SetAuthURLParam("code", ""),
 		)...,
 	)
+}
+
+// exchangeWithClientSecret wraps an OAuth config and adds the client secret
+// to the Exchange request as a Bearer header. This is used by JFrog Artifactory.
+type exchangeWithClientSecret struct {
+	*oauth2.Config
+}
+
+func (e *exchangeWithClientSecret) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+	httpClient, ok := ctx.Value(oauth2.HTTPClient).(*http.Client)
+	if httpClient == nil || !ok {
+		httpClient = http.DefaultClient
+	}
+	oldTransport := httpClient.Transport
+	if oldTransport == nil {
+		oldTransport = http.DefaultTransport
+	}
+	httpClient.Transport = roundTripper(func(req *http.Request) (*http.Response, error) {
+		req.Header.Set("Authorization", "Bearer "+e.ClientSecret)
+		return oldTransport.RoundTrip(req)
+	})
+	return e.Config.Exchange(context.WithValue(ctx, oauth2.HTTPClient, httpClient), code, opts...)
+}
+
+type roundTripper func(req *http.Request) (*http.Response, error)
+
+func (r roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return r(req)
 }

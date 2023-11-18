@@ -338,13 +338,18 @@ func TestStartupLogsSender(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitShort)
 		defer cancel()
 
-		var want, got []agentsdk.Log
-		patchLogs := func(_ context.Context, req agentsdk.PatchLogs) error {
-			got = append(got, req.Logs...)
+		patchStart := make(chan struct{})
+		patchDone := make(chan struct{})
+		patchLogs := func(ctx context.Context, _ agentsdk.PatchLogs) error {
+			close(patchStart)
+			<-ctx.Done()
+			close(patchDone)
 			return nil
 		}
 
-		sendLog, flushAndClose := agentsdk.LogsSender(uuid.New(), patchLogs, slogtest.Make(t, nil).Leveled(slog.LevelDebug))
+		// Prevent race between auto-flush and context cancellation with
+		// a really long timeout.
+		sendLog, flushAndClose := agentsdk.LogsSender(uuid.New(), patchLogs, slogtest.Make(t, nil).Leveled(slog.LevelDebug), agentsdk.LogsSenderFlushTimeout(time.Hour))
 		defer func() {
 			_ = flushAndClose(ctx)
 		}()
@@ -356,10 +361,14 @@ func TestStartupLogsSender(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		cancel()
+		go func() {
+			<-patchStart
+			cancel()
+		}()
 		err = flushAndClose(ctx)
 		require.Error(t, err)
 
-		require.Equal(t, want, got)
+		<-patchDone
+		// The patch request should have been canceled if it was active.
 	})
 }

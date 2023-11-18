@@ -198,6 +198,7 @@ func provisionEnv(
 		"CODER_WORKSPACE_OWNER_SESSION_TOKEN="+metadata.GetWorkspaceOwnerSessionToken(),
 		"CODER_WORKSPACE_TEMPLATE_ID="+metadata.GetTemplateId(),
 		"CODER_WORKSPACE_TEMPLATE_NAME="+metadata.GetTemplateName(),
+		"CODER_WORKSPACE_TEMPLATE_VERSION="+metadata.GetTemplateVersion(),
 	)
 	for key, value := range provisionersdk.AgentScriptEnv() {
 		env = append(env, key+"="+value)
@@ -207,6 +208,7 @@ func provisionEnv(
 	}
 	for _, extAuth := range externalAuth {
 		env = append(env, provider.GitAuthAccessTokenEnvironmentVariable(extAuth.Id)+"="+extAuth.AccessToken)
+		env = append(env, provider.ExternalAuthAccessTokenEnvironmentVariable(extAuth.Id)+"="+extAuth.AccessToken)
 	}
 
 	if config.ProvisionerLogLevel != "" {

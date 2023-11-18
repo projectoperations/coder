@@ -8,7 +8,7 @@ const group: ClibaseGroup = {
 };
 
 const meta: Meta<typeof SecuritySettingsPageView> = {
-  title: "pages/SecuritySettingsPageView",
+  title: "pages/DeploySettingsPage/SecuritySettingsPageView",
   component: SecuritySettingsPageView,
   args: {
     options: [
@@ -47,7 +47,6 @@ const meta: Meta<typeof SecuritySettingsPageView> = {
         hidden: false,
       },
     ],
-    featureAuditLogEnabled: true,
     featureBrowserOnlyEnabled: true,
   },
 };

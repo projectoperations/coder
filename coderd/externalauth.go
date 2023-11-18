@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/sqlc-dev/pqtype"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -132,6 +133,8 @@ func (api *API) postExternalAuthDeviceByID(rw http.ResponseWriter, r *http.Reque
 			OAuthRefreshToken:      token.RefreshToken,
 			OAuthRefreshTokenKeyID: sql.NullString{}, // dbcrypt will set as required
 			OAuthExpiry:            token.Expiry,
+			// No extra data from device auth!
+			OAuthExtra: pqtype.NullRawMessage{},
 		})
 		if err != nil {
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
@@ -150,6 +153,7 @@ func (api *API) postExternalAuthDeviceByID(rw http.ResponseWriter, r *http.Reque
 			OAuthRefreshToken:      token.RefreshToken,
 			OAuthRefreshTokenKeyID: sql.NullString{}, // dbcrypt will update as required
 			OAuthExpiry:            token.Expiry,
+			OAuthExtra:             pqtype.NullRawMessage{},
 		})
 		if err != nil {
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
@@ -201,7 +205,15 @@ func (api *API) externalAuthCallback(externalAuthConfig *externalauth.Config) ht
 			apiKey = httpmw.APIKey(r)
 		)
 
-		_, err := api.Database.GetExternalAuthLink(ctx, database.GetExternalAuthLinkParams{
+		extra, err := externalAuthConfig.GenerateTokenExtra(state.Token)
+		if err != nil {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Failed to generate token extra.",
+				Detail:  err.Error(),
+			})
+			return
+		}
+		_, err = api.Database.GetExternalAuthLink(ctx, database.GetExternalAuthLinkParams{
 			ProviderID: externalAuthConfig.ID,
 			UserID:     apiKey.UserID,
 		})
@@ -224,6 +236,7 @@ func (api *API) externalAuthCallback(externalAuthConfig *externalauth.Config) ht
 				OAuthRefreshToken:      state.Token.RefreshToken,
 				OAuthRefreshTokenKeyID: sql.NullString{}, // dbcrypt will set as required
 				OAuthExpiry:            state.Token.Expiry,
+				OAuthExtra:             extra,
 			})
 			if err != nil {
 				httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
@@ -242,6 +255,7 @@ func (api *API) externalAuthCallback(externalAuthConfig *externalauth.Config) ht
 				OAuthRefreshToken:      state.Token.RefreshToken,
 				OAuthRefreshTokenKeyID: sql.NullString{}, // dbcrypt will update as required
 				OAuthExpiry:            state.Token.Expiry,
+				OAuthExtra:             extra,
 			})
 			if err != nil {
 				httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
@@ -254,8 +268,9 @@ func (api *API) externalAuthCallback(externalAuthConfig *externalauth.Config) ht
 
 		redirect := state.Redirect
 		if redirect == "" {
-			// This is a nicely rendered screen on the frontend
-			redirect = fmt.Sprintf("/external-auth/%s", externalAuthConfig.ID)
+			// This is a nicely rendered screen on the frontend. Passing the query param lets the
+			// FE know not to enter the authentication loop again, and instead display an error.
+			redirect = fmt.Sprintf("/external-auth/%s?redirected=true", externalAuthConfig.ID)
 		}
 		http.Redirect(rw, r, redirect, http.StatusTemporaryRedirect)
 	}

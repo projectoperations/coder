@@ -1,66 +1,61 @@
-import { makeStyles } from "@mui/styles";
-import { FullScreenLoader } from "components/Loader/FullScreenLoader";
-import { FC } from "react";
+import { type Interpolation, type Theme } from "@emotion/react";
+import { type FC } from "react";
 import { useLocation } from "react-router-dom";
-import { AuthContext, UnauthenticatedData } from "xServices/auth/authXService";
 import { SignInForm } from "./SignInForm";
 import { retrieveRedirect } from "utils/redirect";
 import { CoderIcon } from "components/Icons/CoderIcon";
 import { getApplicationName, getLogoURL } from "utils/appearance";
+import type { AuthMethods } from "api/typesGenerated";
 
 export interface LoginPageViewProps {
-  context: AuthContext;
-  isLoading: boolean;
+  authMethods: AuthMethods | undefined;
+  error: unknown;
   isSigningIn: boolean;
   onSignIn: (credentials: { email: string; password: string }) => void;
 }
 
 export const LoginPageView: FC<LoginPageViewProps> = ({
-  context,
-  isLoading,
+  authMethods,
+  error,
   isSigningIn,
   onSignIn,
 }) => {
   const location = useLocation();
   const redirectTo = retrieveRedirect(location.search);
-  const { error } = context;
-  const data = context.data as UnauthenticatedData;
-  const styles = useStyles();
   // This allows messages to be displayed at the top of the sign in form.
   // Helpful for any redirects that want to inform the user of something.
   const info = new URLSearchParams(location.search).get("info") || undefined;
   const applicationName = getApplicationName();
   const logoURL = getLogoURL();
   const applicationLogo = logoURL ? (
-    <div>
-      <img
-        alt={applicationName}
-        src={logoURL}
-        // This prevent browser to display the ugly error icon if the
-        // image path is wrong or user didn't finish typing the url
-        onError={(e) => (e.currentTarget.style.display = "none")}
-        onLoad={(e) => (e.currentTarget.style.display = "inline")}
-      />
-    </div>
+    <img
+      alt={applicationName}
+      src={logoURL}
+      // This prevent browser to display the ugly error icon if the
+      // image path is wrong or user didn't finish typing the url
+      onError={(e) => (e.currentTarget.style.display = "none")}
+      onLoad={(e) => (e.currentTarget.style.display = "inline")}
+      css={{
+        maxWidth: "200px",
+      }}
+    />
   ) : (
-    <CoderIcon fill="white" opacity={1} className={styles.icon} />
+    <CoderIcon fill="white" opacity={1} css={styles.icon} />
   );
 
-  return isLoading ? (
-    <FullScreenLoader />
-  ) : (
-    <div className={styles.root}>
-      <div className={styles.container}>
+  return (
+    <div css={styles.root}>
+      <div css={styles.container}>
         {applicationLogo}
         <SignInForm
-          authMethods={data.authMethods}
+          authMethods={authMethods}
           redirectTo={redirectTo}
           isSigningIn={isSigningIn}
           error={error}
           info={info}
           onSubmit={onSignIn}
         />
-        <footer className={styles.footer}>
+        <footer css={styles.footer}>
           Copyright © {new Date().getFullYear()} Coder Technologies, Inc.
         </footer>
       </div>
@@ -68,9 +63,9 @@ export const LoginPageView: FC<LoginPageViewProps> = ({
   );
 };
 
-const useStyles = makeStyles((theme) => ({
+const styles = {
   root: {
-    padding: theme.spacing(3),
+    padding: 24,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -84,16 +79,16 @@ const useStyles = makeStyles((theme) => ({
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: theme.spacing(2),
+    gap: 16,
   },
 
   icon: {
-    fontSize: theme.spacing(8),
+    fontSize: 64,
   },
 
-  footer: {
+  footer: (theme) => ({
     fontSize: 12,
     color: theme.palette.text.secondary,
-    marginTop: theme.spacing(3),
-  },
-}));
+    marginTop: 24,
+  }),
+} satisfies Record<string, Interpolation<Theme>>;

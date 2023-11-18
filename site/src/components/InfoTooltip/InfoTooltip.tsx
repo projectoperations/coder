@@ -5,11 +5,12 @@ import {
   HelpTooltipTitle,
 } from "components/HelpTooltip/HelpTooltip";
 import InfoIcon from "@mui/icons-material/InfoOutlined";
-import { makeStyles } from "@mui/styles";
-import { colors } from "theme/colors";
+import { css } from "@emotion/css";
+import { useTheme } from "@emotion/react";
 
 interface InfoTooltipProps {
-  type?: "warning" | "info";
+  // TODO: use a `ThemeRole` type or something
+  type?: "warning" | "notice" | "info";
   title: ReactNode;
   message: ReactNode;
 }
@@ -17,31 +18,25 @@ interface InfoTooltipProps {
 export const InfoTooltip: FC<InfoTooltipProps> = (props) => {
   const { title, message, type = "info" } = props;
 
-  const styles = useStyles({ type });
+  const theme = useTheme();
+  const iconColor = theme.experimental.roles[type].outline;
 
   return (
     <HelpTooltip
       size="small"
       icon={InfoIcon}
-      iconClassName={styles.icon}
-      buttonClassName={styles.button}
+      iconClassName={css`
+        color: ${iconColor};
+      `}
+      buttonClassName={css`
+        opacity: 1;
+        &:hover {
+          opacity: 1;
+        }
+      `}
     >
       <HelpTooltipTitle>{title}</HelpTooltipTitle>
       <HelpTooltipText>{message}</HelpTooltipText>
     </HelpTooltip>
   );
 };
-
-const useStyles = makeStyles<unknown, Pick<InfoTooltipProps, "type">>(() => ({
-  icon: ({ type }) => ({
-    color: type === "info" ? colors.blue[5] : colors.yellow[5],
-  }),
-
-  button: {
-    opacity: 1,
-
-    "&:hover": {
-      opacity: 1,
-    },
-  },
-}));

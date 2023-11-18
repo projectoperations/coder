@@ -38,6 +38,7 @@ overrides:
       api_key_scope: APIKeyScope
       api_key_scope_all: APIKeyScopeAll
       api_key_scope_application_connect: APIKeyScopeApplicationConnect
+      api_version: APIVersion
       avatar_url: AvatarURL
       created_by_avatar_url: CreatedByAvatarURL
       dbcrypt_key: DBCryptKey
@@ -53,6 +54,7 @@ overrides:
       oauth_id_token: OAuthIDToken
       oauth_refresh_token: OAuthRefreshToken
       oauth_refresh_token_key_id: OAuthRefreshTokenKeyID
+      oauth_extra: OAuthExtra
       parameter_type_system_hcl: ParameterTypeSystemHCL
       userstatus: UserStatus
       gitsshkey: GitSSHKey

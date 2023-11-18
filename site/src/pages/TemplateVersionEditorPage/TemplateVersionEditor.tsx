@@ -1,7 +1,6 @@
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
-import { makeStyles } from "@mui/styles";
 import Tooltip from "@mui/material/Tooltip";
 import CreateIcon from "@mui/icons-material/AddOutlined";
 import BuildIcon from "@mui/icons-material/BuildOutlined";
@@ -21,7 +20,7 @@ import { AvatarData } from "components/AvatarData/AvatarData";
 import { TemplateResourcesTable } from "components/TemplateResourcesTable/TemplateResourcesTable";
 import { WorkspaceBuildLogs } from "components/WorkspaceBuildLogs/WorkspaceBuildLogs";
 import { PublishVersionData } from "pages/TemplateVersionEditorPage/types";
-import { FC, useCallback, useEffect, useRef, useState } from "react";
+import { type FC, useCallback, useEffect, useRef, useState } from "react";
 import {
   createFile,
   existsFile,
@@ -46,17 +45,17 @@ import {
   getStatus,
   TemplateVersionStatusBadge,
 } from "./TemplateVersionStatusBadge";
-import { Theme } from "@mui/material/styles";
 import AlertTitle from "@mui/material/AlertTitle";
 import { DashboardFullPage } from "components/Dashboard/DashboardLayout";
+import { type Interpolation, type Theme, useTheme } from "@emotion/react";
 
+type Tab = "logs" | "resources" | undefined; // Undefined is to hide the tab
 export interface TemplateVersionEditorProps {
   template: Template;
   templateVersion: TemplateVersion;
   defaultFileTree: FileTree;
   buildLogs?: ProvisionerJobLog[];
   resources?: WorkspaceResource[];
-  deploymentBannerVisible?: boolean;
   disablePreview: boolean;
   disableUpdate: boolean;
   onPreview: (files: FileTree) => void;
@@ -72,6 +71,7 @@ export interface TemplateVersionEditorProps {
   missingVariables?: TemplateVersionVariable[];
   onSubmitMissingVariableValues: (values: VariableValue[]) => void;
   onCancelSubmitMissingVariableValues: () => void;
+  defaultTab?: Tab;
 }
 
 const topbarHeight = 80;
@@ -92,7 +92,6 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
   disablePreview,
   disableUpdate,
   template,
-  deploymentBannerVisible,
   templateVersion,
   defaultFileTree,
   onPreview,
@@ -110,10 +109,10 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
   missingVariables,
   onSubmitMissingVariableValues,
   onCancelSubmitMissingVariableValues,
+  defaultTab,
 }) => {
-  // If resources are provided, show them by default!
-  // This is for Storybook!
-  const [selectedTab, setSelectedTab] = useState(() => (resources ? 1 : 0));
+  const theme = useTheme();
+  const [selectedTab, setSelectedTab] = useState<Tab>(defaultTab);
   const [fileTree, setFileTree] = useState(defaultFileTree);
   const [createFileOpen, setCreateFileOpen] = useState(false);
   const [deleteFileOpen, setDeleteFileOpen] = useState<string>();
@@ -125,8 +124,7 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
 
   const triggerPreview = useCallback(() => {
     onPreview(fileTree);
-    // Switch to the build log!
-    setSelectedTab(0);
+    setSelectedTab("logs");
   }, [fileTree, onPreview]);
 
   // Stop ctrl+s from saving files and make ctrl+enter trigger a preview.
@@ -159,36 +157,34 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
       previousVersion.current = templateVersion;
       return;
     }
+
     if (
       ["running", "pending"].includes(previousVersion.current.job.status) &&
       templateVersion.job.status === "succeeded"
     ) {
-      setSelectedTab(1);
+      setSelectedTab("resources");
       setDirty(false);
     }
     previousVersion.current = templateVersion;
   }, [templateVersion]);
 
   const hasIcon = template.icon && template.icon !== "";
-  const templateVersionSucceeded = templateVersion.job.status === "succeeded";
   const showBuildLogs = Boolean(buildLogs);
   const editorValue = getFileContent(activePath ?? "", fileTree) as string;
-  const firstTemplateVersionOnEditor = useRef(templateVersion);
 
   useEffect(() => {
     window.dispatchEvent(new Event("resize"));
   }, [showBuildLogs]);
-  const styles = useStyles({
-    templateVersionSucceeded,
-    showBuildLogs,
-    deploymentBannerVisible,
-  });
 
   return (
     <>
-      <DashboardFullPage className={styles.root}>
-        <div className={styles.topbar} data-testid="topbar">
-          <div className={styles.topbarSides}>
+      <DashboardFullPage
+        css={{
+          background: theme.palette.background.default,
+        }}
+      >
+        <div css={styles.topbar} data-testid="topbar">
+          <div css={styles.topbarSides}>
             <Link
               component={RouterLink}
               underline="none"
@@ -220,12 +216,9 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
             </Alert>
           )}
 
-          <div className={styles.topbarSides}>
-            {/* Only start to show the build when a new template version is building */}
-            {templateVersion.id !== firstTemplateVersionOnEditor.current.id && (
-              <div className={styles.buildStatus}>
-                <TemplateVersionStatusBadge version={templateVersion} />
-              </div>
+          <div css={styles.topbarSides}>
+            {buildLogs && (
+              <TemplateVersionStatusBadge version={templateVersion} />
             )}
 
             <Button
@@ -248,11 +241,11 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
           </div>
         </div>
 
-        <div className={styles.sidebarAndEditor}>
-          <div className={styles.sidebar}>
-            <div className={styles.sidebarTitle}>
+        <div css={styles.sidebarAndEditor}>
+          <div css={styles.sidebar}>
+            <div css={styles.sidebarTitle}>
               Template files
-              <div className={styles.sidebarActions}>
+              <div css={styles.sidebarActions}>
                 <Tooltip title="Create File" placement="top">
                   <IconButton
                     aria-label="Create File"
@@ -331,8 +324,16 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
             />
           </div>
 
-          <div className={styles.editorPane}>
-            <div className={styles.editor} data-chromatic="ignore">
+          <div
+            css={{
+              display: "grid",
+              width: "100%",
+              gridTemplateColumns: showBuildLogs ? "1fr 1fr" : "1fr 0fr",
+              minHeight: "100%",
+              overflow: "hidden",
+            }}
+          >
+            <div css={styles.editor} data-chromatic="ignore">
               {activePath ? (
                 <MonacoEditor
                   value={editorValue}
@@ -352,14 +353,13 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
               )}
             </div>
 
-            <div className={styles.panelWrapper}>
-              <div className={styles.tabs}>
+            <div css={styles.panelWrapper}>
+              <div css={styles.tabs}>
                 <button
-                  className={`${styles.tab} ${
-                    selectedTab === 0 ? "active" : ""
-                  }`}
+                  css={styles.tab}
+                  className={selectedTab === "logs" ? "active" : ""}
                   onClick={() => {
-                    setSelectedTab(0);
+                    setSelectedTab("logs");
                   }}
                 >
                   {templateVersion.job.status !== "succeeded" ? (
@@ -372,11 +372,10 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
 
                 {!disableUpdate && (
                   <button
-                    className={`${styles.tab} ${
-                      selectedTab === 1 ? "active" : ""
-                    }`}
+                    css={styles.tab}
+                    className={selectedTab === "resources" ? "active" : ""}
                     onClick={() => {
-                      setSelectedTab(1);
+                      setSelectedTab("resources");
                     }}
                   >
                     <PreviewIcon />
@@ -386,9 +385,13 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
               </div>
 
               <div
-                className={`${styles.panel} ${styles.buildLogs} ${
-                  selectedTab === 0 ? "" : "hidden"
-                }`}
+                css={[
+                  styles.panel,
+                  {
+                    display: selectedTab !== "logs" ? "none" : "flex",
+                    flexDirection: "column",
+                  },
+                ]}
               >
                 {templateVersion.job.error && (
                   <div>
@@ -419,9 +422,13 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
               </div>
 
               <div
-                className={`${styles.panel} ${styles.resources} ${
-                  selectedTab === 1 ? "" : "hidden"
-                }`}
+                css={[
+                  styles.panel,
+                  {
+                    paddingBottom: 16,
+                    display: selectedTab !== "resources" ? "none" : undefined,
+                  },
+                ]}
               >
                 {resources && (
                   <TemplateResourcesTable
@@ -432,12 +439,6 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
                 )}
               </div>
             </div>
-
-            {templateVersionSucceeded && (
-              <>
-                <div className={styles.panelDivider} />
-              </>
-            )}
           </div>
         </div>
       </DashboardFullPage>
@@ -462,35 +463,20 @@ export const TemplateVersionEditor: FC<TemplateVersionEditorProps> = ({
   );
 };
 
-const useStyles = makeStyles<
-  Theme,
-  {
-    templateVersionSucceeded: boolean;
-    showBuildLogs: boolean;
-    deploymentBannerVisible?: boolean;
-  }
->((theme) => ({
-  root: {
-    background: theme.palette.background.default,
-  },
-  topbar: {
-    padding: theme.spacing(2),
+const styles = {
+  topbar: (theme) => ({
+    padding: 16,
     borderBottom: `1px solid ${theme.palette.divider}`,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     height: topbarHeight,
     background: theme.palette.background.paper,
-  },
+  }),
   topbarSides: {
     display: "flex",
     alignItems: "center",
-    gap: theme.spacing(2),
-  },
-  buildStatus: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
+    gap: 16,
   },
   sidebarAndEditor: {
     display: "flex",
@@ -498,59 +484,47 @@ const useStyles = makeStyles<
     flexBasis: 0,
     overflow: "hidden",
   },
-  sidebar: {
+  sidebar: (theme) => ({
     minWidth: 256,
     backgroundColor: theme.palette.background.paper,
     borderRight: `1px solid ${theme.palette.divider}`,
-  },
-  sidebarTitle: {
+  }),
+  sidebarTitle: (theme) => ({
     fontSize: 10,
     textTransform: "uppercase",
-    padding: theme.spacing(1, 2),
+    padding: "8px 16px",
     color: theme.palette.text.primary,
     fontWeight: 500,
     letterSpacing: "0.5px",
     display: "flex",
     alignItems: "center",
-  },
-  sidebarActions: {
+  }),
+  sidebarActions: (theme) => ({
     marginLeft: "auto",
     "& svg": {
       fill: theme.palette.text.primary,
     },
-  },
-  editorPane: {
-    display: "grid",
-    width: "100%",
-    gridTemplateColumns: (props) =>
-      props.showBuildLogs ? "1fr 1fr" : "1fr 0fr",
-    minHeight: "100%",
-    overflow: "hidden",
-  },
+  }),
   editor: {
     flex: 1,
   },
-  panelWrapper: {
+  panelWrapper: (theme) => ({
     flex: 1,
     borderLeft: `1px solid ${theme.palette.divider}`,
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
-  },
+  }),
   panel: {
     overflowY: "auto",
     height: "100%",
-
-    "&.hidden": {
-      display: "none",
-    },
 
     // Hack to access customize resource-card from here
     "& .resource-card": {
       border: 0,
     },
   },
-  tabs: {
+  tabs: (theme) => ({
     borderBottom: `1px solid ${theme.palette.divider}`,
     display: "flex",
     boxShadow: "#000000 0 6px 6px -6px inset",
@@ -561,10 +535,10 @@ const useStyles = makeStyles<
       textTransform: "none",
       letterSpacing: "unset",
     },
-  },
-  tab: {
+  }),
+  tab: (theme) => ({
     cursor: "pointer",
-    padding: theme.spacing(1.5),
+    padding: 12,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: "0.5px",
@@ -601,8 +575,8 @@ const useStyles = makeStyles<
     "&:hover": {
       color: theme.palette.text.primary,
     },
-  },
-  tabBar: {
+  }),
+  tabBar: (theme) => ({
     padding: "8px 16px",
     position: "sticky",
     top: 0,
@@ -615,12 +589,5 @@ const useStyles = makeStyles<
     "&.top": {
       borderTop: `1px solid ${theme.palette.divider}`,
     },
-  },
-  buildLogs: {
-    display: "flex",
-    flexDirection: "column",
-  },
-  resources: {
-    paddingBottom: theme.spacing(2),
-  },
-}));
+  }),
+} satisfies Record<string, Interpolation<Theme>>;

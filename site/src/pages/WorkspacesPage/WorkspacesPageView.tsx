@@ -1,14 +1,8 @@
-import Link from "@mui/material/Link";
-import { Workspace } from "api/typesGenerated";
+import { Template, Workspace } from "api/typesGenerated";
 import { PaginationWidgetBase } from "components/PaginationWidget/PaginationWidgetBase";
-import { ComponentProps, FC } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { ComponentProps } from "react";
 import { Margins } from "components/Margins/Margins";
-import {
-  PageHeader,
-  PageHeaderSubtitle,
-  PageHeaderTitle,
-} from "components/PageHeader/PageHeader";
+import { PageHeader, PageHeaderTitle } from "components/PageHeader/PageHeader";
 import { Stack } from "components/Stack/Stack";
 import { WorkspaceHelpTooltip } from "./WorkspaceHelpTooltip";
 import { WorkspacesTable } from "pages/WorkspacesPage/WorkspacesTable";
@@ -22,17 +16,32 @@ import {
   TableToolbar,
 } from "components/TableToolbar/TableToolbar";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import DeleteOutlined from "@mui/icons-material/DeleteOutlined";
+import { WorkspacesButton } from "./WorkspacesButton";
+import { UseQueryResult } from "react-query";
+import StopOutlined from "@mui/icons-material/StopOutlined";
+import PlayArrowOutlined from "@mui/icons-material/PlayArrowOutlined";
+import {
+  MoreMenu,
+  MoreMenuContent,
+  MoreMenuItem,
+  MoreMenuTrigger,
+} from "components/MoreMenu/MoreMenu";
+import KeyboardArrowDownOutlined from "@mui/icons-material/KeyboardArrowDownOutlined";
+import Divider from "@mui/material/Divider";
+import LoadingButton from "@mui/lab/LoadingButton";
 
 export const Language = {
   pageTitle: "Workspaces",
   yourWorkspacesButton: "Your workspaces",
   allWorkspacesButton: "All workspaces",
   runningWorkspacesButton: "Running workspaces",
-  createANewWorkspace: `Create a new workspace from a `,
+  createWorkspace: <>Create Workspace&hellip;</>,
+  seeAllTemplates: "See all templates",
   template: "Template",
 };
+
+type TemplateQuery = UseQueryResult<Template[]>;
 
 export interface WorkspacesPageViewProps {
   error: unknown;
@@ -46,13 +55,17 @@ export interface WorkspacesPageViewProps {
   onPageChange: (page: number) => void;
   onUpdateWorkspace: (workspace: Workspace) => void;
   onCheckChange: (checkedWorkspaces: Workspace[]) => void;
+  isRunningBatchAction: boolean;
   onDeleteAll: () => void;
+  onStartAll: () => void;
+  onStopAll: () => void;
   canCheckWorkspaces: boolean;
+  templatesFetchStatus: TemplateQuery["status"];
+  templates: TemplateQuery["data"];
+  canCreateTemplate: boolean;
 }
 
-export const WorkspacesPageView: FC<
-  React.PropsWithChildren<WorkspacesPageViewProps>
-> = ({
+export const WorkspacesPageView = ({
   workspaces,
   dormantWorkspaces,
   error,
@@ -65,8 +78,14 @@ export const WorkspacesPageView: FC<
   checkedWorkspaces,
   onCheckChange,
   onDeleteAll,
+  onStopAll,
+  onStartAll,
+  isRunningBatchAction,
   canCheckWorkspaces,
-}) => {
+  templates,
+  templatesFetchStatus,
+  canCreateTemplate,
+}: WorkspacesPageViewProps) => {
   const { saveLocal } = useLocalStorage();
 
   const workspacesDeletionScheduled = dormantWorkspaces
@@ -78,21 +97,22 @@ export const WorkspacesPageView: FC<
 
   return (
     <Margins>
-      <PageHeader>
+      <PageHeader
+        actions={
+          <WorkspacesButton
+            templates={templates}
+            templatesFetchStatus={templatesFetchStatus}
+          >
+            {Language.createWorkspace}
+          </WorkspacesButton>
+        }
+      >
         <PageHeaderTitle>
           <Stack direction="row" spacing={1} alignItems="center">
             <span>{Language.pageTitle}</span>
             <WorkspaceHelpTooltip />
           </Stack>
         </PageHeaderTitle>
-
-        <PageHeaderSubtitle>
-          {Language.createANewWorkspace}
-          <Link component={RouterLink} to="/templates">
-            {Language.template}
-          </Link>
-          .
-        </PageHeaderSubtitle>
       </PageHeader>
 
       <Stack>
@@ -124,15 +144,46 @@ export const WorkspacesPageView: FC<
               {workspaces?.length === 1 ? "workspace" : "workspaces"}
             </Box>
 
-            <Box sx={{ marginLeft: "auto" }}>
-              <Button
-                size="small"
-                startIcon={<DeleteOutlined />}
-                onClick={onDeleteAll}
-              >
-                Delete selected
-              </Button>
-            </Box>
+            <MoreMenu>
+              <MoreMenuTrigger>
+                <LoadingButton
+                  loading={isRunningBatchAction}
+                  loadingPosition="end"
+                  variant="text"
+                  size="small"
+                  css={{ borderRadius: 9999, marginLeft: "auto" }}
+                  endIcon={<KeyboardArrowDownOutlined />}
+                >
+                  Actions
+                </LoadingButton>
+              </MoreMenuTrigger>
+              <MoreMenuContent>
+                <MoreMenuItem
+                  onClick={onStartAll}
+                  disabled={
+                    !checkedWorkspaces?.every(
+                      (w) => w.latest_build.status === "stopped",
+                    )
+                  }
+                >
+                  <PlayArrowOutlined /> Start
+                </MoreMenuItem>
+                <MoreMenuItem
+                  onClick={onStopAll}
+                  disabled={
+                    !checkedWorkspaces?.every(
+                      (w) => w.latest_build.status === "running",
+                    )
+                  }
+                >
+                  <StopOutlined /> Stop
+                </MoreMenuItem>
+                <Divider />
+                <MoreMenuItem danger onClick={onDeleteAll}>
+                  <DeleteOutlined /> Delete&hellip;
+                </MoreMenuItem>
+              </MoreMenuContent>
+            </MoreMenu>
           </>
         ) : (
           <PaginationStatus
@@ -145,19 +196,22 @@ export const WorkspacesPageView: FC<
       </TableToolbar>
 
       <WorkspacesTable
+        canCreateTemplate={canCreateTemplate}
         workspaces={workspaces}
         isUsingFilter={filterProps.filter.used}
         onUpdateWorkspace={onUpdateWorkspace}
         checkedWorkspaces={checkedWorkspaces}
         onCheckChange={onCheckChange}
         canCheckWorkspaces={canCheckWorkspaces}
+        templates={templates}
       />
+
       {count !== undefined && (
         <PaginationWidgetBase
-          count={count}
-          limit={limit}
-          onChange={onPageChange}
-          page={page}
+          totalRecords={count}
+          pageSize={limit}
+          onPageChange={onPageChange}
+          currentPage={page}
         />
       )}
     </Margins>

@@ -76,6 +76,14 @@ var testCases = []testCase{
 		name:          "env_from",
 		expectedError: "",
 	},
+	{
+		name:          "extra_templates",
+		expectedError: "",
+	},
+	{
+		name:          "prometheus",
+		expectedError: "",
+	},
 }
 
 type testCase struct {
@@ -154,7 +162,10 @@ func TestUpdateGoldenFiles(t *testing.T) {
 
 		valuesPath := tc.valuesFilePath()
 		templateOutput, err := runHelmTemplate(t, helmPath, "..", valuesPath)
-
+		if err != nil {
+			t.Logf("error running `helm template -f %q`: %v", valuesPath, err)
+			t.Logf("output: %s", templateOutput)
+		}
 		require.NoError(t, err, "failed to run `helm template -f %q`", valuesPath)
 
 		goldenFilePath := tc.goldenFilePath()

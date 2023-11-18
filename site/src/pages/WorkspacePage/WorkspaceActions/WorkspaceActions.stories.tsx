@@ -3,7 +3,7 @@ import * as Mocks from "testHelpers/entities";
 import { WorkspaceActions } from "./WorkspaceActions";
 
 const meta: Meta<typeof WorkspaceActions> = {
-  title: "components/WorkspaceActions",
+  title: "pages/WorkspacePage/WorkspaceActions",
   component: WorkspaceActions,
   args: {
     isUpdating: false,
@@ -77,5 +77,19 @@ export const Updating: Story = {
   args: {
     isUpdating: true,
     workspace: Mocks.MockOutdatedWorkspace,
+  },
+};
+
+export const RequireActiveVersionStarted: Story = {
+  args: {
+    workspace: Mocks.MockOutdatedRunningWorkspaceRequireActiveVersion,
+    canChangeVersions: false,
+  },
+};
+
+export const RequireActiveVersionStopped: Story = {
+  args: {
+    workspace: Mocks.MockOutdatedStoppedWorkspaceRequireActiveVersion,
+    canChangeVersions: false,
   },
 };

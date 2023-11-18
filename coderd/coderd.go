@@ -38,6 +38,7 @@ import (
 	// Used for swagger docs.
 	_ "github.com/coder/coder/v2/coderd/apidoc"
 	"github.com/coder/coder/v2/coderd/externalauth"
+	"github.com/coder/coder/v2/coderd/healthcheck/derphealth"
 
 	"cdr.dev/slog"
 	"github.com/coder/coder/v2/buildinfo"
@@ -131,6 +132,7 @@ type Options struct {
 	SetUserSiteRoles            func(ctx context.Context, logger slog.Logger, tx database.Store, userID uuid.UUID, roles []string) error
 	TemplateScheduleStore       *atomic.Pointer[schedule.TemplateScheduleStore]
 	UserQuietHoursScheduleStore *atomic.Pointer[schedule.UserQuietHoursScheduleStore]
+	AccessControlStore          *atomic.Pointer[dbauthz.AccessControlStore]
 	// AppSecurityKey is the crypto key used to sign and encrypt tokens related to
 	// workspace applications. It consists of both a signing and encryption key.
 	AppSecurityKey     workspaceapps.SecurityKey
@@ -208,11 +210,20 @@ func New(options *Options) *API {
 	if options.Authorizer == nil {
 		options.Authorizer = rbac.NewCachingAuthorizer(options.PrometheusRegistry)
 	}
+
+	if options.AccessControlStore == nil {
+		options.AccessControlStore = &atomic.Pointer[dbauthz.AccessControlStore]{}
+		var tacs dbauthz.AccessControlStore = dbauthz.AGPLTemplateAccessControlStore{}
+		options.AccessControlStore.Store(&tacs)
+	}
+
 	options.Database = dbauthz.New(
 		options.Database,
 		options.Authorizer,
 		options.Logger.Named("authz_querier"),
+		options.AccessControlStore,
 	)
+
 	experiments := ReadExperiments(
 		options.Logger, options.DeploymentValues.Experiments.Value(),
 	)
@@ -369,6 +380,7 @@ func New(options *Options) *API {
 		Auditor:                     atomic.Pointer[audit.Auditor]{},
 		TemplateScheduleStore:       options.TemplateScheduleStore,
 		UserQuietHoursScheduleStore: options.UserQuietHoursScheduleStore,
+		AccessControlStore:          options.AccessControlStore,
 		Experiments:                 experiments,
 		healthCheckGroup:            &singleflight.Group[string, *healthcheck.Report]{},
 		Acquirer: provisionerdserver.NewAcquirer(
@@ -387,10 +399,20 @@ func New(options *Options) *API {
 	if options.HealthcheckFunc == nil {
 		options.HealthcheckFunc = func(ctx context.Context, apiKey string) *healthcheck.Report {
 			return healthcheck.Run(ctx, &healthcheck.ReportOptions{
-				DB:        options.Database,
-				AccessURL: options.AccessURL,
-				DERPMap:   api.DERPMap(),
-				APIKey:    apiKey,
+				Database: healthcheck.DatabaseReportOptions{
+					DB:        options.Database,
+					Threshold: options.DeploymentValues.Healthcheck.ThresholdDatabase.Value(),
+				},
+				Websocket: healthcheck.WebsocketReportOptions{
+					AccessURL: options.AccessURL,
+					APIKey:    apiKey,
+				},
+				AccessURL: healthcheck.AccessURLReportOptions{
+					AccessURL: options.AccessURL,
+				},
+				DerpHealth: derphealth.ReportOptions{
+					DERPMap: api.DERPMap(),
+				},
 			})
 		}
 	}
@@ -398,7 +420,7 @@ func New(options *Options) *API {
 		options.HealthcheckTimeout = 30 * time.Second
 	}
 	if options.HealthcheckRefresh == 0 {
-		options.HealthcheckRefresh = 10 * time.Minute
+		options.HealthcheckRefresh = options.DeploymentValues.Healthcheck.Refresh.Value()
 	}
 
 	var oidcAuthURLParams map[string]string
@@ -597,6 +619,7 @@ func New(options *Options) *API {
 		})
 		r.Route("/experiments", func(r chi.Router) {
 			r.Use(apiKeyMiddleware)
+			r.Get("/available", handleExperimentsSafe)
 			r.Get("/", api.handleExperimentsGet)
 		})
 		r.Get("/updatecheck", api.updateCheck)
@@ -652,7 +675,6 @@ func New(options *Options) *API {
 					r.Get("/roles", api.assignableOrgRoles)
 					r.Route("/{user}", func(r chi.Router) {
 						r.Use(
-							httpmw.ExtractUserParam(options.Database, false),
 							httpmw.ExtractOrganizationMemberParam(options.Database),
 						)
 						r.Put("/roles", api.putMemberRoles)
@@ -671,6 +693,7 @@ func New(options *Options) *API {
 			r.Delete("/", api.deleteTemplate)
 			r.Patch("/", api.patchTemplateMeta)
 			r.Route("/versions", func(r chi.Router) {
+				r.Post("/archive", api.postArchiveTemplateVersions)
 				r.Get("/", api.templateVersionsByTemplate)
 				r.Patch("/", api.patchActiveTemplateVersion)
 				r.Get("/{templateversionname}", api.templateVersionByName)
@@ -684,6 +707,8 @@ func New(options *Options) *API {
 			r.Get("/", api.templateVersion)
 			r.Patch("/", api.patchTemplateVersion)
 			r.Patch("/cancel", api.patchCancelTemplateVersion)
+			r.Post("/archive", api.postArchiveTemplateVersion())
+			r.Post("/unarchive", api.postUnarchiveTemplateVersion())
 			// Old agents may expect a non-error response from /schema and /parameters endpoints.
 			// The idea is to return an empty [], so that the coder CLI won't get blocked accidentally.
 			r.Get("/schema", templateVersionSchemaDeprecated)
@@ -741,7 +766,7 @@ func New(options *Options) *API {
 					r.Get("/", api.assignableSiteRoles)
 				})
 				r.Route("/{user}", func(r chi.Router) {
-					r.Use(httpmw.ExtractUserParam(options.Database, false))
+					r.Use(httpmw.ExtractUserParam(options.Database))
 					r.Post("/convert-login", api.postConvertLoginType)
 					r.Delete("/", api.deleteUser)
 					r.Get("/", api.userByName)
@@ -812,12 +837,15 @@ func New(options *Options) *API {
 				r.Patch("/startup-logs", api.patchWorkspaceAgentLogsDeprecated)
 				r.Patch("/logs", api.patchWorkspaceAgentLogs)
 				r.Post("/app-health", api.postWorkspaceAppHealth)
+				// Deprecated: Required to support legacy agents
 				r.Get("/gitauth", api.workspaceAgentsGitAuth)
+				r.Get("/external-auth", api.workspaceAgentsExternalAuth)
 				r.Get("/gitsshkey", api.agentGitSSHKey)
 				r.Get("/coordinate", api.workspaceAgentCoordinate)
 				r.Post("/report-stats", api.workspaceAgentReportStats)
 				r.Post("/report-lifecycle", api.workspaceAgentReportLifecycle)
-				r.Post("/metadata/{key}", api.workspaceAgentPostMetadata)
+				r.Post("/metadata", api.workspaceAgentPostMetadata)
+				r.Post("/metadata/{key}", api.workspaceAgentPostMetadataDeprecated)
 			})
 			r.Route("/{workspaceagent}", func(r chi.Router) {
 				r.Use(
@@ -867,6 +895,8 @@ func New(options *Options) *API {
 				r.Get("/watch", api.watchWorkspace)
 				r.Put("/extend", api.putExtendWorkspace)
 				r.Put("/dormant", api.putWorkspaceDormant)
+				r.Put("/autoupdates", api.putWorkspaceAutoupdates)
+				r.Get("/resolve-autostart", api.resolveAutostart)
 			})
 		})
 		r.Route("/workspacebuilds/{workspacebuild}", func(r chi.Router) {
@@ -925,6 +955,7 @@ func New(options *Options) *API {
 			)
 
 			r.Get("/coordinator", api.debugCoordinator)
+			r.Get("/tailnet", api.debugTailnet)
 			r.Get("/health", api.debugDeploymentHealth)
 			r.Get("/ws", (&healthcheck.WebsocketEchoServer{}).ServeHTTP)
 		})
@@ -1001,6 +1032,9 @@ type API struct {
 	UserQuietHoursScheduleStore *atomic.Pointer[schedule.UserQuietHoursScheduleStore]
 	// DERPMapper mutates the DERPMap to include workspace proxies.
 	DERPMapper atomic.Pointer[func(derpMap *tailcfg.DERPMap) *tailcfg.DERPMap]
+	// AccessControlStore is a pointer to an atomic pointer since it is
+	// passed to dbauthz.
+	AccessControlStore *atomic.Pointer[dbauthz.AccessControlStore]
 
 	HTTPAuth *HTTPAuthorizer
 
@@ -1102,6 +1136,7 @@ func (api *API) CreateInMemoryProvisionerDaemon(ctx context.Context) (client pro
 	logger := api.Logger.Named(fmt.Sprintf("inmem-provisionerd-%s", name))
 	logger.Info(ctx, "starting in-memory provisioner daemon")
 	srv, err := provisionerdserver.NewServer(
+		api.ctx,
 		api.AccessURL,
 		uuid.New(),
 		logger,

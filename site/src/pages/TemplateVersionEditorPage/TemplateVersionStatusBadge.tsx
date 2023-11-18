@@ -39,9 +39,9 @@ export const getStatus = (
       };
     case "pending":
       return {
+        type: "info",
         text: "Pending",
         icon: <LoadingIcon />,
-        type: "info",
       };
     case "canceling":
       return {
@@ -55,6 +55,7 @@ export const getStatus = (
         text: "Canceled",
         icon: <ErrorIcon />,
       };
+    case "unknown":
     case "failed":
       return {
         type: "error",

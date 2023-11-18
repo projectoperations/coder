@@ -394,6 +394,8 @@ func (r *userCleanupRunner) Run(ctx context.Context, _ string, _ io.Writer) erro
 }
 
 func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
+	var template string
+
 	cleanupStrategy := &scaletestStrategyFlags{cleanup: true}
 	client := new(codersdk.Client)
 
@@ -407,7 +409,7 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 		Handler: func(inv *clibase.Invocation) error {
 			ctx := inv.Context()
 
-			_, err := requireAdmin(ctx, client)
+			me, err := requireAdmin(ctx, client)
 			if err != nil {
 				return err
 			}
@@ -421,8 +423,15 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 				},
 			}
 
+			if template != "" {
+				_, err := parseTemplate(ctx, client, me.OrganizationIDs, template)
+				if err != nil {
+					return xerrors.Errorf("parse template: %w", err)
+				}
+			}
+
 			cliui.Infof(inv.Stdout, "Fetching scaletest workspaces...")
-			workspaces, err := getScaletestWorkspaces(ctx, client)
+			workspaces, err := getScaletestWorkspaces(ctx, client, template)
 			if err != nil {
 				return err
 			}
@@ -494,6 +503,15 @@ func (r *RootCmd) scaletestCleanup() *clibase.Cmd {
 		},
 	}
 
+	cmd.Options = clibase.OptionSet{
+		{
+			Flag:        "template",
+			Env:         "CODER_SCALETEST_CLEANUP_TEMPLATE",
+			Description: "Name or ID of the template. Only delete workspaces created from the given template.",
+			Value:       clibase.StringOf(&template),
+		},
+	}
+
 	cleanupStrategy.attach(&cmd.Options)
 	return cmd
 }
@@ -503,7 +521,6 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 		count    int64
 		template string
 
-		noPlan    bool
 		noCleanup bool
 		// TODO: implement this flag
 		// noCleanupFailures bool
@@ -524,6 +541,8 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 		connectTimeout  time.Duration
 
 		useHostUser bool
+
+		parameterFlags workspaceParameterFlags
 
 		tracingFlags    = &scaletestTracingFlags{}
 		strategy        = &scaletestStrategyFlags{}
@@ -563,66 +582,29 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 				return xerrors.Errorf("could not parse --output flags")
 			}
 
-			var tpl codersdk.Template
 			if template == "" {
 				return xerrors.Errorf("--template is required")
 			}
-			if id, err := uuid.Parse(template); err == nil && id != uuid.Nil {
-				tpl, err = client.Template(ctx, id)
-				if err != nil {
-					return xerrors.Errorf("get template by ID %q: %w", template, err)
-				}
-			} else {
-				// List templates in all orgs until we find a match.
-			orgLoop:
-				for _, orgID := range me.OrganizationIDs {
-					tpls, err := client.TemplatesByOrganization(ctx, orgID)
-					if err != nil {
-						return xerrors.Errorf("list templates in org %q: %w", orgID, err)
-					}
-
-					for _, t := range tpls {
-						if t.Name == template {
-							tpl = t
-							break orgLoop
-						}
-					}
-				}
-			}
-			if tpl.ID == uuid.Nil {
-				return xerrors.Errorf("could not find template %q in any organization", template)
-			}
-			templateVersion, err := client.TemplateVersion(ctx, tpl.ActiveVersionID)
+			tpl, err := parseTemplate(ctx, client, me.OrganizationIDs, template)
 			if err != nil {
-				return xerrors.Errorf("get template version %q: %w", tpl.ActiveVersionID, err)
+				return xerrors.Errorf("parse template: %w", err)
 			}
 
-			// Do a dry-run to ensure the template and parameters are valid
-			// before we start creating users and workspaces.
-			if !noPlan {
-				dryRun, err := client.CreateTemplateVersionDryRun(ctx, templateVersion.ID, codersdk.CreateTemplateVersionDryRunRequest{
-					WorkspaceName: "scaletest",
-				})
-				if err != nil {
-					return xerrors.Errorf("start dry run workspace creation: %w", err)
-				}
-				_, _ = fmt.Fprintln(inv.Stdout, "Planning workspace...")
-				err = cliui.ProvisionerJob(inv.Context(), inv.Stdout, cliui.ProvisionerJobOptions{
-					Fetch: func() (codersdk.ProvisionerJob, error) {
-						return client.TemplateVersionDryRun(inv.Context(), templateVersion.ID, dryRun.ID)
-					},
-					Cancel: func() error {
-						return client.CancelTemplateVersionDryRun(inv.Context(), templateVersion.ID, dryRun.ID)
-					},
-					Logs: func() (<-chan codersdk.ProvisionerJobLog, io.Closer, error) {
-						return client.TemplateVersionDryRunLogsAfter(inv.Context(), templateVersion.ID, dryRun.ID, 0)
-					},
-					// Don't show log output for the dry-run unless there's an error.
-					Silent: true,
-				})
-				if err != nil {
-					return xerrors.Errorf("dry-run workspace: %w", err)
-				}
+			cliRichParameters, err := asWorkspaceBuildParameters(parameterFlags.richParameters)
+			if err != nil {
+				return xerrors.Errorf("can't parse given parameter values: %w", err)
+			}
+
+			richParameters, err := prepWorkspaceBuild(inv, client, prepWorkspaceBuildArgs{
+				Action:            WorkspaceCreate,
+				TemplateVersionID: tpl.ActiveVersionID,
+				NewWorkspaceName:  "scaletest-N", // TODO: the scaletest runner will pass in a different name here. Does this matter?
+
+				RichParameterFile: parameterFlags.richParameterFile,
+				RichParameters:    cliRichParameters,
+			})
+			if err != nil {
+				return xerrors.Errorf("prepare build: %w", err)
 			}
 
 			tracerProvider, closeTracing, tracingEnabled, err := tracingFlags.provider(ctx)
@@ -653,7 +635,8 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 						OrganizationID: me.OrganizationIDs[0],
 						// UserID is set by the test automatically.
 						Request: codersdk.CreateWorkspaceRequest{
-							TemplateID: tpl.ID,
+							TemplateID:          tpl.ID,
+							RichParameterValues: richParameters,
 						},
 						NoWaitForAgents: noWaitForAgents,
 					},
@@ -773,12 +756,6 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 			Value:         clibase.StringOf(&template),
 		},
 		{
-			Flag:        "no-plan",
-			Env:         "CODER_SCALETEST_NO_PLAN",
-			Description: `Skip the dry-run step to plan the workspace creation. This step ensures that the given parameters are valid for the given template.`,
-			Value:       clibase.BoolOf(&noPlan),
-		},
-		{
 			Flag:        "no-cleanup",
 			Env:         "CODER_SCALETEST_NO_CLEANUP",
 			Description: "Do not clean up resources after the test completes. You can cleanup manually using coder scaletest cleanup.",
@@ -865,6 +842,7 @@ func (r *RootCmd) scaletestCreateWorkspaces() *clibase.Cmd {
 		},
 	}
 
+	cmd.Options = append(cmd.Options, parameterFlags.cliParameters()...)
 	tracingFlags.attach(&cmd.Options)
 	strategy.attach(&cmd.Options)
 	cleanupStrategy.attach(&cmd.Options)
@@ -877,6 +855,7 @@ func (r *RootCmd) scaletestWorkspaceTraffic() *clibase.Cmd {
 		tickInterval time.Duration
 		bytesPerTick int64
 		ssh          bool
+		template     string
 
 		client          = &codersdk.Client{}
 		tracingFlags    = &scaletestTracingFlags{}
@@ -894,10 +873,16 @@ func (r *RootCmd) scaletestWorkspaceTraffic() *clibase.Cmd {
 		),
 		Handler: func(inv *clibase.Invocation) error {
 			ctx := inv.Context()
+
+			me, err := requireAdmin(ctx, client)
+			if err != nil {
+				return err
+			}
+
 			reg := prometheus.NewRegistry()
 			metrics := workspacetraffic.NewMetrics(reg, "username", "workspace_name", "agent_name")
 
-			logger := slog.Make(sloghuman.Sink(io.Discard))
+			logger := inv.Logger
 			prometheusSrvClose := ServeHandler(ctx, logger, promhttp.HandlerFor(reg, promhttp.HandlerOpts{}), prometheusFlags.Address, "prometheus")
 			defer prometheusSrvClose()
 
@@ -911,7 +896,14 @@ func (r *RootCmd) scaletestWorkspaceTraffic() *clibase.Cmd {
 				},
 			}
 
-			workspaces, err := getScaletestWorkspaces(inv.Context(), client)
+			if template != "" {
+				_, err := parseTemplate(ctx, client, me.OrganizationIDs, template)
+				if err != nil {
+					return xerrors.Errorf("parse template: %w", err)
+				}
+			}
+
+			workspaces, err := getScaletestWorkspaces(inv.Context(), client, template)
 			if err != nil {
 				return err
 			}
@@ -1016,6 +1008,13 @@ func (r *RootCmd) scaletestWorkspaceTraffic() *clibase.Cmd {
 
 	cmd.Options = []clibase.Option{
 		{
+			Flag:          "template",
+			FlagShorthand: "t",
+			Env:           "CODER_SCALETEST_TEMPLATE",
+			Description:   "Name or ID of the template. Traffic generation will be limited to workspaces created from this template.",
+			Value:         clibase.StringOf(&template),
+		},
+		{
 			Flag:        "bytes-per-tick",
 			Env:         "CODER_SCALETEST_WORKSPACE_TRAFFIC_BYTES_PER_TICK",
 			Default:     "1024",
@@ -1076,7 +1075,10 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 				return xerrors.Errorf("--jitter must be less than --interval")
 			}
 			ctx := inv.Context()
-			logger := slog.Make(sloghuman.Sink(inv.Stdout)).Leveled(slog.LevelInfo)
+			logger := inv.Logger.AppendSinks(sloghuman.Sink(inv.Stdout))
+			if r.verbose {
+				logger = logger.Leveled(slog.LevelDebug)
+			}
 			tracerProvider, closeTracing, tracingEnabled, err := tracingFlags.provider(ctx)
 			if err != nil {
 				return xerrors.Errorf("create tracer provider: %w", err)
@@ -1126,17 +1128,22 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 				userClient.SetSessionToken(userTokResp.Key)
 
 				config := dashboard.Config{
-					Interval:   interval,
-					Jitter:     jitter,
-					Trace:      tracingEnabled,
-					Logger:     logger.Named(name),
-					Headless:   headless,
-					ActionFunc: dashboard.ClickRandomElement,
-					RandIntn:   rndGen.Intn,
+					Interval: interval,
+					Jitter:   jitter,
+					Trace:    tracingEnabled,
+					Logger:   logger.Named(name),
+					Headless: headless,
+					RandIntn: rndGen.Intn,
+				}
+				// Only take a screenshot if we're in verbose mode.
+				// This could be useful for debugging, but it will blow up the disk.
+				if r.verbose {
+					config.Screenshot = dashboard.Screenshot
 				}
 				//nolint:gocritic
-				logger.Info(ctx, "runner config", slog.F("min_wait", interval), slog.F("max_wait", jitter), slog.F("headless", headless), slog.F("trace", tracingEnabled))
+				logger.Info(ctx, "runner config", slog.F("interval", interval), slog.F("jitter", jitter), slog.F("headless", headless), slog.F("trace", tracingEnabled))
 				if err := config.Validate(); err != nil {
+					logger.Fatal(ctx, "validate config", slog.Error(err))
 					return err
 				}
 				var runner harness.Runnable = dashboard.NewRunner(userClient, metrics, config)
@@ -1178,14 +1185,14 @@ func (r *RootCmd) scaletestDashboard() *clibase.Cmd {
 		{
 			Flag:        "interval",
 			Env:         "CODER_SCALETEST_DASHBOARD_INTERVAL",
-			Default:     "3s",
+			Default:     "10s",
 			Description: "Interval between actions.",
 			Value:       clibase.DurationOf(&interval),
 		},
 		{
 			Flag:        "jitter",
 			Env:         "CODER_SCALETEST_DASHBOARD_JITTER",
-			Default:     "2s",
+			Default:     "5s",
 			Description: "Jitter between actions.",
 			Value:       clibase.DurationOf(&jitter),
 		},
@@ -1251,7 +1258,7 @@ func (r *runnableTraceWrapper) Run(ctx context.Context, id string, logs io.Write
 	return r.runner.Run(ctx2, id, logs)
 }
 
-func (r *runnableTraceWrapper) Cleanup(ctx context.Context, id string) error {
+func (r *runnableTraceWrapper) Cleanup(ctx context.Context, id string, logs io.Writer) error {
 	c, ok := r.runner.(harness.Cleanable)
 	if !ok {
 		return nil
@@ -1263,7 +1270,7 @@ func (r *runnableTraceWrapper) Cleanup(ctx context.Context, id string) error {
 	ctx, span := r.tracer.Start(ctx, r.spanName+" cleanup")
 	defer span.End()
 
-	return c.Cleanup(ctx, id)
+	return c.Cleanup(ctx, id, logs)
 }
 
 // newScaleTestUser returns a random username and email address that can be used
@@ -1291,7 +1298,7 @@ func isScaleTestWorkspace(workspace codersdk.Workspace) bool {
 		strings.HasPrefix(workspace.Name, "scaletest-")
 }
 
-func getScaletestWorkspaces(ctx context.Context, client *codersdk.Client) ([]codersdk.Workspace, error) {
+func getScaletestWorkspaces(ctx context.Context, client *codersdk.Client, template string) ([]codersdk.Workspace, error) {
 	var (
 		pageNumber = 0
 		limit      = 100
@@ -1300,9 +1307,10 @@ func getScaletestWorkspaces(ctx context.Context, client *codersdk.Client) ([]cod
 
 	for {
 		page, err := client.Workspaces(ctx, codersdk.WorkspaceFilter{
-			Name:   "scaletest-",
-			Offset: pageNumber * limit,
-			Limit:  limit,
+			Name:     "scaletest-",
+			Template: template,
+			Offset:   pageNumber * limit,
+			Limit:    limit,
 		})
 		if err != nil {
 			return nil, xerrors.Errorf("fetch scaletest workspaces page %d: %w", pageNumber, err)
@@ -1358,4 +1366,34 @@ func getScaletestUsers(ctx context.Context, client *codersdk.Client) ([]codersdk
 	}
 
 	return users, nil
+}
+
+func parseTemplate(ctx context.Context, client *codersdk.Client, organizationIDs []uuid.UUID, template string) (tpl codersdk.Template, err error) {
+	if id, err := uuid.Parse(template); err == nil && id != uuid.Nil {
+		tpl, err = client.Template(ctx, id)
+		if err != nil {
+			return tpl, xerrors.Errorf("get template by ID %q: %w", template, err)
+		}
+	} else {
+		// List templates in all orgs until we find a match.
+	orgLoop:
+		for _, orgID := range organizationIDs {
+			tpls, err := client.TemplatesByOrganization(ctx, orgID)
+			if err != nil {
+				return tpl, xerrors.Errorf("list templates in org %q: %w", orgID, err)
+			}
+
+			for _, t := range tpls {
+				if t.Name == template {
+					tpl = t
+					break orgLoop
+				}
+			}
+		}
+	}
+	if tpl.ID == uuid.Nil {
+		return tpl, xerrors.Errorf("could not find template %q in any organization", template)
+	}
+
+	return tpl, nil
 }
